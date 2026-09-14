@@ -130,7 +130,7 @@ Wattson 不追求单点最强，而是把「多机 · 全历史 · 本地优先�
 
 **方式一：菜单栏客户端（推荐，全程 GUI）**
 
-拿 `Wattson-<版本>-arm64.dmg` 安装（或 `bash scripts/package-app.sh` 自建），首次运行自动弹出向导：探测本机工具 → 添加远端设备（自动验证 SSH 可达性与数据源）→ 端口/刷新间隔 → 一键启动。经即时通讯/AirDrop 分发的未签名包需先 `xattr -cr /Applications/Wattson.app`。
+拿 [Releases](https://github.com/makamark/wattson-usage/releases) 里的 `Wattson-<版本>-arm64.dmg` 安装（或 `bash scripts/package-app.sh` 自建），首次运行自动弹出向导：探测本机工具 → 添加远端设备（自动验证 SSH 可达性与数据源）→ 端口/刷新间隔 → 一键启动。经即时通讯/AirDrop 分发的未签名包需先 `xattr -cr /Applications/Wattson.app`。
 
 **方式二：脚本安装（launchd 常驻）**
 
