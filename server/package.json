@@ -1,0 +1,19 @@
+{
+  "name": "agg-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "dev": "tsx src/main.ts"
+  },
+  "//": "tsx 是运行时加载器（dev 与打包内嵌态都用 --import tsx），必须放 dependencies 才能被 prepare-stage 的 npm ci --omit=dev 带上并锁版本",
+  "dependencies": {
+    "tsx": "^4",
+    "undici": "^7.29.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "typescript": "^5",
+    "vitest": "^3"
+  }
+}

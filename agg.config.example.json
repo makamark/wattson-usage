@@ -1,0 +1,7 @@
+{
+  "server": { "port": 8317, "refreshMinutes": 30 },
+  "devices": [
+    { "name": "macair", "local": true },
+    { "name": "desktop", "ssh": "workstation" }
+  ]
+}

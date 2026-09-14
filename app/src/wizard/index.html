@@ -1,0 +1,295 @@
+<!doctype html>
+<!-- app/src/wizard/index.html — 初始化/设置向导：本机探测 + 远端设备（SSH 可达性探测，
+     口径同 scripts/setup.sh）+ 服务参数 → 写配置 → 派生 devices.json → 首次同步 →（重）启服务。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Wattson · 设置</title>
+<style>
+  :root {
+    --bg: #111318; --panel: #1b1e26; --panel-2: #21252f; --border: #2a2e39;
+    --text: #e6e6e6; --muted: #9aa3b2; --accent: #5470c6; --ok: #7ee787; --err: #ff7b72;
+  }
+  * { box-sizing: border-box; }
+  /* 滚动容器会被 Chromium 隐式聚焦，窗口重新激活时 :focus-visible 默认描边会画一圈
+     系统色边框（小窗同类问题）；滚动定位无需可见焦点，明确关闭 */
+  .scroll:focus, .scroll:focus-visible, .logbox:focus, .logbox:focus-visible { outline: none; }
+  body {
+    margin: 0; padding: 18px 22px; font-family: system-ui, -apple-system, "PingFang SC", sans-serif;
+    background: var(--bg); color: var(--text); font-size: 13.5px; line-height: 1.5;
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 12.5px; margin-bottom: 14px; }
+  .scroll { flex: 1; overflow-y: auto; padding-right: 6px; }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+  section h2 { font-size: 13px; margin: 0 0 10px; letter-spacing: 0.02em; }
+  section h2 small { font-weight: 400; color: var(--muted); margin-left: 6px; }
+  .chip { display: inline-block; font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); margin: 2px 4px 2px 0; }
+  .chip.ok { color: var(--ok); border-color: #2c4434; }
+  .chip.muted { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 11.5px; color: var(--muted); font-weight: 500; padding: 2px 8px 6px 0; }
+  td { padding: 5px 8px 5px 0; border-top: 1px solid var(--border); vertical-align: middle; }
+  td .ssh, td input { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+  input { font: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; width: 100%; }
+  input:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+  input[type="number"] { width: 110px; }
+  button { font: inherit; font-size: 12.5px; color: var(--text); background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px; cursor: pointer; }
+  button:hover { background: #262b38; border-color: #3a4152; }
+  button:active { transform: translateY(1px); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: #5f7cd4; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button.danger { color: var(--err); }
+  .addrow { display: grid; grid-template-columns: 140px 1fr auto auto; gap: 8px; align-items: center; margin-top: 10px; }
+  .probe-result { font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 18px; }
+  .probe-result.ok { color: var(--ok); }
+  .probe-result.err { color: var(--err); }
+  .fields { display: flex; gap: 18px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .path { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--muted); }
+  footer { display: flex; gap: 10px; align-items: center; padding-top: 12px; border-top: 1px solid var(--border); margin-top: 4px; }
+  footer .spacer { flex: 1; }
+  .steps { list-style: none; padding: 0; margin: 0 0 10px; }
+  .steps li { padding: 3px 0; color: var(--muted); }
+  .steps li::before { content: '·'; margin-right: 8px; }
+  .steps li.doing { color: var(--text); }
+  .steps li.doing::before { content: '▸'; }
+  .steps li.done { color: var(--ok); }
+  .steps li.done::before { content: '✓'; }
+  .logbox { background: #0d0f13; border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--muted); height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+  .errbox { background: rgba(255, 123, 114, 0.08); border: 1px solid #4a2b28; color: var(--err); border-radius: 10px; padding: 10px 12px; margin-top: 10px; white-space: pre-wrap; }
+  .note { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+  <h1 id="title">初始化 Wattson</h1>
+  <div class="sub">配置多机用量采集：本机自动识别；远端机器只需 ssh 免密可达（数据经快照镜像到本机，看板仅监听 127.0.0.1）。</div>
+
+  <div class="scroll" id="form">
+    <section>
+      <h2>本机 <small id="local-name"></small></h2>
+      <div id="local-tools"></div>
+      <div class="note" style="margin-top:6px" id="local-note"></div>
+    </section>
+
+    <section>
+      <h2>远端设备 <small>设备名 = 镜像目录名与看板「设备」维度值；SSH 目标为免密别名或 user@host</small></h2>
+      <table id="dev-table"><thead><tr><th style="width:130px">设备名</th><th>SSH 目标</th><th style="width:190px">探测结果</th><th style="width:56px"></th></tr></thead><tbody></tbody></table>
+      <div class="addrow">
+        <input id="add-name" placeholder="设备名（如 desktop）">
+        <input id="add-ssh" placeholder="SSH 别名（如 workstation）或 user@host">
+        <button id="btn-probe">探测</button>
+        <button id="btn-add" class="primary" disabled>添加</button>
+      </div>
+      <div class="probe-result" id="probe-result">先探测可达性，再添加</div>
+    </section>
+
+    <section>
+      <h2>服务</h2>
+      <div class="fields">
+        <div class="field"><label>监听端口（固定绑 127.0.0.1）</label><input id="port" type="number" min="1" max="65535" value="8317"></div>
+        <div class="field"><label>重解析间隔（分钟）</label><input id="refresh" type="number" min="1" value="30"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="scroll" id="progress" style="display:none">
+    <section>
+      <h2>初始化进度</h2>
+      <ul class="steps" id="steps"></ul>
+      <div class="logbox" id="log"></div>
+      <div class="note" id="prog-note" style="margin-top:8px"></div>
+    </section>
+  </div>
+
+  <footer>
+    <span class="path" id="config-path"></span>
+    <span class="spacer"></span>
+    <button id="btn-back" style="display:none">返回编辑</button>
+    <button id="btn-save" class="primary">保存并初始化</button>
+  </footer>
+
+<script>
+'use strict'
+const $ = (s) => document.querySelector(s)
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+
+let local = ''            // 本机设备名
+let remotes = []          // [{name, ssh, probe}]
+let pending = null        // 待添加行：{ok, tools, missing, error}
+
+function toolsChips(tools) {
+  return tools.length
+    ? tools.map((t) => `<span class="chip ok">${esc(t)}</span>`).join('')
+    : '<span class="chip muted">无数据源</span>'
+}
+
+function renderTable() {
+  const tbody = $('#dev-table tbody')
+  tbody.innerHTML = remotes.map((d, i) => `
+    <tr>
+      <td>${esc(d.name)}</td>
+      <td class="ssh">${esc(d.ssh)}</td>
+      <td>${d.probe ? toolsChips(d.probe.tools) + (d.probe.missing || []).map((m) => `<span class="chip" style="color:#d29922">缺 ${esc(m)}</span>`).join('') : '<span class="chip muted">未探测</span>'}</td>
+      <td style="text-align:right"><button class="danger" data-i="${i}">移除</button></td>
+    </tr>`).join('') || '<tr><td colspan="4" class="note" style="border-top:1px solid var(--border);padding:8px 0">（无远端设备，仅统计本机）</td></tr>'
+  tbody.querySelectorAll('button[data-i]').forEach((b) => b.addEventListener('click', () => {
+    remotes.splice(Number(b.dataset.i), 1); renderTable()
+  }))
+}
+
+async function init() {
+  const info = await window.bridge.wizGet()
+  local = info.localName
+  $('#local-name').textContent = local
+  $('#local-tools').innerHTML = toolsChips(info.localTools || [])
+  $('#local-note').textContent = (info.localTools || []).length === 0
+    ? '本机未发现任何工具数据源（zcode / codex / workbuddy）——仍可只看远端设备。'
+    : ''
+  const cfg = info.config
+  remotes = ((cfg && cfg.devices) || []).filter((d) => !d.local).map((d) => ({ name: d.name, ssh: d.ssh, probe: null }))
+  $('#port').value = (cfg && cfg.server && cfg.server.port) || 8317
+  $('#refresh').value = (cfg && cfg.server && cfg.server.refreshMinutes) || 30
+  $('#config-path').textContent = info.configPath
+  if (cfg) {
+    $('#title').textContent = '设置 · 设备与服务'
+    document.title = 'Wattson · 设置'
+  }
+  renderTable()
+
+  $('#btn-probe').addEventListener('click', async () => {
+    const dest = $('#add-ssh').value.trim()
+    const result = $('#probe-result')
+    if (!dest) { result.className = 'probe-result err'; result.textContent = '请填写 SSH 目标'; return }
+    result.className = 'probe-result'; result.textContent = '探测中…（ssh 免密连接）'
+    pending = null; $('#btn-add').disabled = true
+    const r = await window.bridge.probeSsh(dest)
+    if (!r.ok) {
+      result.className = 'probe-result err'
+      result.textContent = '✗ ' + (r.error || '不可达')
+      return
+    }
+    pending = { dest, ...r }
+    result.className = 'probe-result ok'
+    result.textContent = '✓ 可达，数据源：' + (r.tools.join(' / ') || '无') + (r.missing.length ? '（远端缺 ' + r.missing.join(', ') + '，镜像会失败）' : '')
+    if (!r.tools.length) { result.textContent += ' — 远端无数据源，不建议添加'; return }
+    if (!$('#add-name').value.trim()) $('#add-name').value = dest.split(':')[0]
+    $('#btn-add').disabled = false
+  })
+
+  $('#btn-add').addEventListener('click', () => {
+    const name = $('#add-name').value.trim()
+    if (!name || !pending) return
+    remotes.push({ name, ssh: pending.dest, probe: { tools: pending.tools, missing: pending.missing } })
+    $('#add-name').value = ''; $('#add-ssh').value = ''
+    pending = null; $('#btn-add').disabled = true
+    const result = $('#probe-result')
+    result.className = 'probe-result'; result.textContent = '先探测可达性，再添加'
+    renderTable()
+  })
+
+  $('#btn-save').addEventListener('click', save)
+  $('#btn-back').addEventListener('click', () => {
+    $('#progress').style.display = 'none'; $('#form').style.display = ''; $('#btn-back').style.display = 'none'
+    $('#btn-save').style.display = ''
+  })
+}
+
+function stepHtml(id, text, cls) {
+  return `<li id="step-${id}" class="${cls}">${esc(text)}</li>`
+}
+
+async function save() {
+  const port = Number($('#port').value), refresh = Number($('#refresh').value)
+  const cfg = { server: { port, refreshMinutes: refresh }, devices: [{ name: local, local: true }, ...remotes.map((d) => ({ name: d.name, ssh: d.ssh }))] }
+  $('#form').style.display = 'none'; $('#progress').style.display = ''
+  $('#btn-back').style.display = ''; $('#btn-save').style.display = 'none'
+  const steps = $('#steps')
+  steps.innerHTML = stepHtml('write', '写入 agg.config.json', 'doing') + stepHtml('devices', '生成 codeburn 设备映射（devices.json）', '') + stepHtml('server', '启动聚合服务', '') + stepHtml('mirror', '首次远端同步', '')
+  const log = $('#log'); log.textContent = ''
+  const say = (line) => { log.textContent += line + '\n'; log.scrollTop = log.scrollHeight }
+
+  const r = await window.bridge.saveConfig(cfg)
+  if (!r.ok) {
+    steps.querySelector('#step-write').className = ''
+    steps.insertAdjacentHTML('afterbegin', `<div class="errbox">${esc(r.error || '保存失败')}</div>`)
+    $('#btn-save').style.display = ''; return
+  }
+  $('#step-write').className = 'done'; $('#step-devices').className = 'done'
+  say('配置已写入，共 ' + remotes.length + ' 台远端设备')
+
+  const restarted = r.restarted || 'embedded'
+  if (restarted === 'kept-external' || restarted === 'kept-external-port-changed') {
+    $('#step-server').className = 'done'
+    say('检测到外部聚合服务（launchd）已在运行，继续复用')
+    if (restarted === 'kept-external-port-changed') {
+      $('#prog-note').textContent = '端口已改但外部服务仍监听旧端口——请自行重启外部服务（launchctl kickstart -k gui/$(id -u)/com.wattson.server），或卸载它改由客户端托管。'
+    }
+  } else {
+    $('#step-server').className = 'doing'
+    say('聚合服务启动中（冷启动需解析全量数据，约 1–2 分钟）…')
+  }
+
+  if (remotes.length === 0) {
+    $('#step-mirror').className = 'done'; say('无远端设备，跳过同步')
+    finish(); return
+  }
+  $('#step-mirror').className = 'doing'
+  say('--- 首次同步（VACUUM 快照 + rsync，视数据量可能数分钟）---')
+  const started = await window.bridge.runMirror()
+  if (!started) say('同步已在进行中，等待其完成…')
+}
+
+window.bridge.onMirrorLog((line) => {
+  const log = $('#log')
+  if (!log) return
+  log.textContent += line + '\n'; log.scrollTop = log.scrollHeight
+  // 终态以 mirror.sh 的机器可读汇总行为准（ROUND RESULT devices=N ok=X failed=Y skipped=Z busy=W），
+  // 不再靠「全部完成/本轮结束」等日志关键词——单台设备的中间行不再提前触发完成
+  const m = /ROUND RESULT devices=(\d+) ok=(\d+) failed=(\d+) skipped=(\d+) busy=(\d+)/.exec(line)
+  if (m) {
+    const bad = Number(m[3]) + Number(m[4])
+    const s = document.querySelector('#step-mirror')
+    if (s && s.className === 'doing') s.className = bad > 0 ? '' : 'done'
+    if (bad > 0) {
+      log.textContent += '本轮有未完成的设备（失败 ' + m[3] + '，跳过 ' + m[4] + '）：这些设备的数据暂缺，可稍后用托盘菜单「立即同步远端」重试\n'
+      log.scrollTop = log.scrollHeight
+    }
+    finish()
+    return
+  }
+  if (/无远端设备/.test(line)) {
+    const s = document.querySelector('#step-mirror')
+    if (s && s.className === 'doing') s.className = 'done'
+    finish()
+  }
+})
+window.bridge.onState((s) => {
+  // server 步骤在服务就绪后打勾（外部复用/内嵌启动两种路径都覆盖）
+  const step = document.querySelector('#step-server')
+  if (step && step.className === 'doing' && (s.phase === 'ready' || s.phase === 'external')) {
+    step.className = 'done'
+    const log = $('#log')
+    log.textContent += (s.phase === 'external' ? '外部服务就绪' : '聚合服务就绪') + '\n'
+    log.scrollTop = log.scrollHeight
+  }
+})
+
+let finished = false
+function finish() {
+  if (finished) return
+  if (!document.querySelector('#step-server').classList.contains('done')) {
+    setTimeout(finish, 2000); return // 服务还没就绪，等它
+  }
+  finished = true
+  $('#btn-back').textContent = '返回编辑'
+  $('#prog-note').textContent = '初始化完成。菜单栏托盘将显示近 24 小时用量，点图标随时打开小窗。'
+}
+
+void init()
+</script>
+</body>
+</html>

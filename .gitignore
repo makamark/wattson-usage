@@ -1,0 +1,19 @@
+node_modules/
+dist/
+data/
+.superpowers/
+*.log
+.DS_Store
+agg.config.json
+
+# 菜单栏客户端（app/）
+app/release/
+app/build/icon.svg.png
+app/build/trayTemplate.svg.png
+app/stage/
+
+# 开发期验收截图（未在 README 引用，不入库；README 引用的 popup/dashboard 两张除外）
+docs/acceptance-app-dashboard.png
+docs/acceptance-filter-bar.png
+docs/acceptance-plan-section.png
+docs/acceptance-quota-multi-provider.png

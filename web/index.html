@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>Wattson · AI 用量看板</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <!-- 关键内联样式：JS/CSS 载入前避免白屏闪烁（深色骨架背景） -->
+  <style>
+    html { background: #14181a; }
+    body { margin: 0; background: #14181a; color: #ece9df; font-family: system-ui, -apple-system, "PingFang SC", "Segoe UI", sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar"></aside>
+    <div id="content">
+      <header id="topbar"></header>
+      <main id="page">
+        <section id="kpi" class="page-block" hidden></section>
+        <section id="filters" class="page-block" hidden></section>
+        <section id="chart-card" class="page-block card-block" hidden>
+          <div class="card-head">
+            <h3>用量趋势</h3>
+            <div class="segmented" id="chart-seg"></div>
+          </div>
+          <div id="mainchart"></div>
+        </section>
+        <section id="plan" class="page-block" hidden></section>
+        <section id="hosts" class="page-block" hidden></section>
+        <section id="matrix" class="page-block card-block" hidden></section>
+        <section id="models" class="page-block card-block" hidden></section>
+        <section id="settings" class="page-block" hidden></section>
+      </main>
+      <footer id="status"></footer>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
