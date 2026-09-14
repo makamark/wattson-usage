@@ -39,6 +39,9 @@ export interface QuotaSnapshot { accounts: QuotaAccount[] }
 const LOGOS: Record<string, string> = {
   glm: 'zai.svg', codex: 'openai.svg', claude: 'claude.svg',
   cursor: 'cursor.svg', workbuddy: 'codebuddy.svg', trae: 'trae.svg',
+  kimi: 'kimi.svg', gemini: 'gemini.svg', grok: 'grok.svg',
+  kiro: 'kiro.svg', copilot: 'github.svg', openrouter: 'openrouter.svg', minimax: 'minimax.svg',
+  // zed / codebuff / factory 暂无官方可用 SVG，走首字母 fallback
 }
 
 let renderSeq = 0
@@ -46,10 +49,13 @@ let renderSeq = 0
 /** 窗口短标签（w.label 是「5 小时窗口」这类长名，卡内用短名省宽度） */
 const WINDOW_SHORT: Record<string, string> = {
   fiveHour: '5小时', week: '周', weekSonnet: '周·Sonnet', extra: '额外', cycle: '周期',
+  credits: '积分', limit: 'Key 限额', editPredictions: '补全', rate: '速率',
 }
 
 const KIND_SHORT: Record<string, string> = {
   glm: 'GLM', codex: 'Codex', claude: 'Claude', cursor: 'Cursor', workbuddy: 'WorkBuddy', trae: 'Trae',
+  kimi: 'Kimi', gemini: 'Gemini', grok: 'Grok', zed: 'Zed', kiro: 'Kiro', codebuff: 'Codebuff',
+  factory: 'Factory', copilot: 'Copilot', openrouter: 'OpenRouter', minimax: 'MiniMax',
 }
 
 function fmtReset(ms: number | null): string {

@@ -10,6 +10,16 @@ import { claudeAccount } from './claude.js'
 import { cursorAccount } from './cursor.js'
 import { workbuddyAccount } from './workbuddy.js'
 import { traeAccount } from './trae.js'
+import { kimiAccount } from './kimi.js'
+import { geminiAccount } from './gemini.js'
+import { grokAccount } from './grok.js'
+import { zedAccount } from './zed.js'
+import { kiroAccount } from './kiro.js'
+import { codebuffAccount } from './codebuff.js'
+import { factoryAccount } from './factory.js'
+import { copilotAccount } from './copilot.js'
+import { openrouterAccount } from './openrouter.js'
+import { minimaxAccount } from './minimax.js'
 import type { FetchLike, QuotaAccount, QuotaSnapshot } from './types.js'
 
 /** GLM 的 PlanSnapshot（绝对值口径）→ 统一 QuotaAccount */
@@ -48,6 +58,16 @@ const LOADING_ACCOUNTS: QuotaAccount[] = [
   { kind: 'cursor', label: 'Cursor', available: false, unavailableReason: 'loading', error: null, planName: null, windows: [], fetchedAt: 0, lastSuccessAt: null },
   { kind: 'workbuddy', label: 'WorkBuddy', available: false, unavailableReason: 'loading', error: null, planName: null, windows: [], fetchedAt: 0, lastSuccessAt: null },
   { kind: 'trae', label: 'Trae', available: false, unavailableReason: 'loading', error: null, planName: null, windows: [], fetchedAt: 0, lastSuccessAt: null },
+  { kind: 'kimi', label: 'Kimi', available: false, unavailableReason: 'loading', error: null, planName: null, windows: [], fetchedAt: 0, lastSuccessAt: null },
+  { kind: 'gemini', label: 'Gemini', available: false, unavailableReason: 'loading', error: null, planName: null, windows: [], fetchedAt: 0, lastSuccessAt: null },
+  { kind: 'grok', label: 'Grok', available: false, unavailableReason: 'loading', error: null, planName: null, windows: [], fetchedAt: 0, lastSuccessAt: null },
+  { kind: 'zed', label: 'Zed', available: false, unavailableReason: 'loading', error: null, planName: null, windows: [], fetchedAt: 0, lastSuccessAt: null },
+  { kind: 'kiro', label: 'Kiro', available: false, unavailableReason: 'loading', error: null, planName: null, windows: [], fetchedAt: 0, lastSuccessAt: null },
+  { kind: 'codebuff', label: 'Codebuff', available: false, unavailableReason: 'loading', error: null, planName: null, windows: [], fetchedAt: 0, lastSuccessAt: null },
+  { kind: 'factory', label: 'Factory', available: false, unavailableReason: 'loading', error: null, planName: null, windows: [], fetchedAt: 0, lastSuccessAt: null },
+  { kind: 'copilot', label: 'Copilot', available: false, unavailableReason: 'loading', error: null, planName: null, windows: [], fetchedAt: 0, lastSuccessAt: null },
+  { kind: 'openrouter', label: 'OpenRouter', available: false, unavailableReason: 'loading', error: null, planName: null, windows: [], fetchedAt: 0, lastSuccessAt: null },
+  { kind: 'minimax', label: 'MiniMax', available: false, unavailableReason: 'loading', error: null, planName: null, windows: [], fetchedAt: 0, lastSuccessAt: null },
 ]
 
 export class QuotaPoller {
@@ -79,6 +99,16 @@ export class QuotaPoller {
         Promise.resolve(cursorAccount(this.home, this.env, this.doFetch, now)).catch(isolate('cursor', now)),
         Promise.resolve(workbuddyAccount(this.home, this.env, this.doFetch, now)).catch(isolate('workbuddy', now)),
         Promise.resolve(traeAccount(this.home, this.env, this.doFetch, now)).catch(isolate('trae', now)),
+        Promise.resolve(kimiAccount(this.home, this.env, this.doFetch, now)).catch(isolate('kimi', now)),
+        Promise.resolve(geminiAccount(this.home, this.env, this.doFetch, now)).catch(isolate('gemini', now)),
+        Promise.resolve(grokAccount(this.home, this.env, this.doFetch, now)).catch(isolate('grok', now)),
+        Promise.resolve(zedAccount(this.home, this.env, this.doFetch, now)).catch(isolate('zed', now)),
+        Promise.resolve(kiroAccount(this.home, this.env, this.doFetch, now)).catch(isolate('kiro', now)),
+        Promise.resolve(codebuffAccount(this.home, this.env, this.doFetch, now)).catch(isolate('codebuff', now)),
+        Promise.resolve(factoryAccount(this.home, this.env, this.doFetch, now)).catch(isolate('factory', now)),
+        Promise.resolve(copilotAccount(this.home, this.env, this.doFetch, now)).catch(isolate('copilot', now)),
+        Promise.resolve(openrouterAccount(this.home, this.env, this.doFetch, now)).catch(isolate('openrouter', now)),
+        Promise.resolve(minimaxAccount(this.home, this.env, this.doFetch, now)).catch(isolate('minimax', now)),
       ])
       this.snapshot = { accounts: results }
     })().finally(() => {

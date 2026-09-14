@@ -29,7 +29,7 @@
 
 - 🔭 **一处看全部** —— 本机 42 种 AI 编码工具自动发现，多台远端机器经 SSH 镜像汇总；按 天/小时 × 设备/工具/模型/项目 任意切片，看 Token、调用量与估算成本
 - 🕵️ **菜单栏侦探** —— 托盘标题常显近 24h Token；左键弹状态小窗（KPI + 分工具/设备条形图），右键开完整看板；首运行 GUI 向导五分钟配好多机
-- 🧾 **订阅额度卡片** —— GLM / Codex / Claude / Cursor / WorkBuddy / Trae 的额度窗口、已用百分比与重置倒计时，直连各家官方接口只读拉取
+- 🧾 **订阅额度卡片** —— GLM / Codex / Claude / Cursor / WorkBuddy / Trae / Kimi / Gemini / Grok / Zed / Kiro / Codebuff / Factory / Copilot / OpenRouter / MiniMax 共 16 个账号的额度窗口、已用百分比与重置倒计时，直连各家官方接口只读拉取
 - 🛰️ **远端零安装** —— 远端机器只需要系统自带的 `ssh` + `rsync` + `sqlite3`，不装 Node、不装 Python、不留常驻进程；zcode 库在远端投影成 ~2MB 精简快照，增量轮传输 KiB 级（[实测](docs/mirror-volume.md)）
 - 🔒 **数据不出本机** —— 服务只绑 `127.0.0.1`，无遥测、无云端；订阅凭据只在服务端内存解密，不落看板
 - 💰 **可解释的成本** —— LiteLLM 官方价目折算；reasoning-in-output 工具按 billable 口径去重计价；内部模型名可用 `model-alias` 一键映射
@@ -42,7 +42,7 @@ What no other usage monitor gives you in one package:
 
 - **Multi-machine aggregation with zero remote install** — your other Macs / Linux boxes need nothing but system `ssh` + `rsync` + `sqlite3`. Wattson SSH-pulls a minimal projection of each remote database (~2 MB out of a ~190 MB SQLite library, KiB-level incremental rounds) every 30 minutes. No agent, no daemon, no listening port on the remote side.
 - **Three surfaces, one app** — a menu-bar popup with live 24 h tokens, a full ECharts web dashboard, and a REST API bound to `127.0.0.1`.
-- **Subscription quota cards** — GLM Coding Plan (ZCode), Codex (ChatGPT), Claude Code, Cursor, WorkBuddy, Trae: 5-hour windows, weekly quotas, remaining % and reset countdowns, pulled read-only from official endpoints.
+- **Subscription quota cards** — GLM Coding Plan (ZCode), Codex (ChatGPT), Claude Code, Cursor, WorkBuddy, Trae, Kimi, Gemini, Grok, Zed, Kiro, Codebuff, Factory, Copilot, OpenRouter and MiniMax: 16 accounts with quota windows, remaining % and reset countdowns, pulled read-only from official endpoints.
 - **Private by construction** — localhost-only, no telemetry, no cloud; credentials are decrypted in server memory and never reach the UI.
 
 Looking for a self-hosted Claude Code usage dashboard, a Codex / GLM Coding Plan quota monitor, or a menu-bar token tracker that follows you across every machine? That combination is Wattson — see the [comparison below](#-同类工具对比--how-wattson-compares).
@@ -56,7 +56,7 @@ Wattson 不追求单点最强，而是把「多机 · 全历史 · 本地优先�
 | 形态 | 菜单栏 + Web 看板 + REST API | CLI / statusline | 菜单栏（原生 Swift） | 菜单栏（原生 Swift） | 自托管 Web 看板（Python） |
 | 多机聚合 | ✅ SSH 拉取，远端零安装零常驻 | — | — | — | ⚠️ 每台机器各装一个服务再互相联邦 |
 | 用量历史分析 | ✅ 设备/工具/模型/项目 × 天/小时全切片 | ✅ 本机日/周/会话 | ⚠️ 额度为主 + 7/30 天花费估算 | ⚠️ 今日/30 天花费 | ✅ 另有会话钻取、热力图 |
-| 订阅额度 | 6 账号（GLM/Codex/Claude/Cursor/WorkBuddy/Trae） | — | ✅ 60+ 提供商 | ✅ 12 提供商 | ✅（部分需 opt-in 轮询） |
+| 订阅额度 | 16 账号（GLM/Codex/Claude/Cursor/WorkBuddy/Trae/Kimi/Gemini/Grok/Zed/Kiro/Codebuff/Factory/Copilot/OpenRouter/MiniMax） | — | ✅ 60+ 提供商 | ✅ 12 提供商 | ✅（部分需 opt-in 轮询） |
 | 解析的工具数 | **42** | 19 | 以额度为主 | 花费统计 3 个 | ~24 |
 | 中文生态（GLM/ZCode、WorkBuddy、Trae） | ✅ 用量 + 额度 + 远端镜像 | ZCode 用量 | z.ai 额度 | z.ai 额度 | — |
 | 数据暴露面 | 仅 127.0.0.1 | 本地 CLI | 本地 | 本地 | 需开放只读 HTTP（官方建议 Tailscale） |
@@ -105,7 +105,7 @@ Wattson 不追求单点最强，而是把「多机 · 全历史 · 本地优先�
 | **Codex** ⭐ | jsonl 会话目录 | 目录级增量 rsync（`--delete` 跟随远端归档） |
 | **WorkBuddy** ⭐ | SQLite | `VACUUM INTO` 一致性快照 → rsync 增量 |
 
-### 🧾 订阅额度卡片（6 个账号）
+### 🧾 订阅额度卡片（16 个账号）
 
 | 账号 | 凭据来源（本机，自动） | 额度窗口 |
 |---|---|---|
@@ -115,6 +115,16 @@ Wattson 不追求单点最强，而是把「多机 · 全历史 · 本地优先�
 | **Cursor** | `~/.cursor/auth.json` 或 `CURSOR_ACCESS_TOKEN` | 5 小时窗口 + 周期额度 |
 | **WorkBuddy** | `~/codeburn-agg/workbuddy-auth.json`（token 在钥匙串，需手动提供） | 周期额度 |
 | **Trae** | `~/codeburn-agg/trae-auth.json` 或 `TRAE_ACCESS_TOKEN` | 周期额度 |
+| **Kimi** | `~/.kimi-code/credentials/kimi-code.json` 或 `KIMI_CODE_API_KEY` | 周额度 + 速率窗口 |
+| **Gemini**（oauth-personal） | `~/.gemini/oauth_creds.json`（过期自动刷新回写） | 按模型每日配额 |
+| **Grok** | `~/.grok/auth.json` 或 `GROK_OAUTH_TOKEN` | 订阅周期额度（SuperGrok） |
+| **Zed** | `ZED_ACCESS_TOKEN`+`ZED_USER_ID`（或 `ZED_KEYCHAIN=1` 读钥匙串） | 补全额度 + 账期进度 |
+| **Kiro** | kiro-cli 本地 SQLite（`KIRO_ACCESS_TOKEN`+`KIRO_PROFILE_ARN` 可覆盖） | 周期额度（CodeWhisperer credits） |
+| **Codebuff** | `~/.config/manicode/credentials.json` 或 `CODEBUFF_API_KEY` | 积分额度 + 周额度 |
+| **Factory** | `~/.factory/.env` 或 `FACTORY_API_KEY` | 5 小时窗口 + 周额度 + 月度额度 |
+| **Copilot** | `COPILOT_API_TOKEN`（GitHub OAuth token） | Premium 请求 + Chat（月度重置） |
+| **OpenRouter** | `OPENROUTER_API_KEY` | 账户余额 + Key 限额 |
+| **MiniMax** | `MINIMAX_API_KEY` / `MINIMAX_CODING_API_KEY`（`MINIMAX_REGION=cn` 切中国区） | 5 小时窗口 + 周额度 |
 
 ### 💻 操作系统与硬件
 
@@ -233,7 +243,7 @@ node codeburn/dist/cli.js model-flat-rate <模型名>               # 声明为�
 | `GET /api/series?bucket=day\|hour&group=…&metric=tokens\|cost\|calls` | 主图时间序列（分组超 12 合并「其他」，桶上限 400） |
 | `GET /api/matrix?rows=…` | 行×模型 Token 热力矩阵 |
 | `GET /api/models?…` | 模型明细表（按 token 总量降序） |
-| `GET /api/plan` | 订阅额度（见上表 6 账号；TTL 5 分钟，凭据不出服务端） |
+| `GET /api/plan` | 订阅额度（见上表 16 账号；TTL 5 分钟，凭据不出服务端） |
 | `POST /api/refresh` | 触发后台全量重解析，立即返回 202 |
 
 **LaunchAgent 启停**：`launchctl load/unload ~/Library/LaunchAgents/com.wattson.{server,mirror}.plist`，日志在 `~/codeburn-agg/{server,mirror}.log`；手动前台调试 `cd server && npx tsx src/main.ts`；客户端开发 `cd app && npm run dev`。

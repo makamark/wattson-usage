@@ -213,7 +213,7 @@ function renderChips(s) {
 /* 订阅额度（多账号）：品牌色标 + 套餐徽标 + 每窗口条 + 重置倒计时；
    主数字为剩余口径（对齐官方展示），无凭据/加载中的账号整块隐藏，剩余 ≤30% 的窗口数字标红（重点） */
 const QUOTA_SHORT = { fiveHour: '5小时', week: '周', weekSonnet: '周·Sonnet', extra: '额外', cycle: '周期' }
-const ACCOUNT_SHORT = { glm: 'GLM', codex: 'Codex', claude: 'Claude', cursor: 'Cursor', workbuddy: 'WorkBuddy', trae: 'Trae' }
+const ACCOUNT_SHORT = { glm: 'GLM', codex: 'Codex', claude: 'Claude', cursor: 'Cursor', workbuddy: 'WorkBuddy', trae: 'Trae', kimi: 'Kimi', gemini: 'Gemini', grok: 'Grok', zed: 'Zed', kiro: 'Kiro', codebuff: 'Codebuff', factory: 'Factory', copilot: 'Copilot', openrouter: 'OpenRouter', minimax: 'MiniMax' }
 
 function planSection(plan) {
   const accounts = (plan && plan.accounts) || []

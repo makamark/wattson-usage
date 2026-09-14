@@ -2,7 +2,10 @@
 // 统一窗口模型兼容两种口径：绝对值（glm/workbuddy 的 总额/已用/剩余）与
 // 纯百分比（codex/claude/cursor 只给 used_percent/utilization）。
 
-export type QuotaKind = 'glm' | 'codex' | 'claude' | 'cursor' | 'workbuddy' | 'trae'
+export type QuotaKind =
+  | 'glm' | 'codex' | 'claude' | 'cursor' | 'workbuddy' | 'trae'
+  | 'kimi' | 'gemini' | 'grok' | 'zed' | 'kiro' | 'codebuff' | 'factory'
+  | 'copilot' | 'openrouter' | 'minimax'
 
 export type QuotaWindow = {
   /** fiveHour | week | cycle | sevenDaySonnet | extra | … */

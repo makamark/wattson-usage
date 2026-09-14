@@ -15,6 +15,18 @@ import {
 } from '../src/quotas/cursor.js'
 import { readWorkbuddyAuth, workbuddyWindows } from '../src/quotas/workbuddy.js'
 import { readTraeAuth, traeWindows } from '../src/quotas/trae.js'
+import { readKimiAuth, fetchKimiAccount } from '../src/quotas/kimi.js'
+import { readGrokAuth, fetchGrokAccount, grokAccount } from '../src/quotas/grok.js'
+import { fetchCopilotAccount, readCopilotAuth } from '../src/quotas/copilot.js'
+import { fetchOpenRouterAccount, readOpenRouterAuth } from '../src/quotas/openrouter.js'
+import { readCodebuffAuth, fetchCodebuffAccount } from '../src/quotas/codebuff.js'
+import { readFactoryApiKey, fetchFactoryAccount } from '../src/quotas/factory.js'
+import { readMiniMaxAuth, fetchMiniMaxAccount } from '../src/quotas/minimax.js'
+import { readZedAuth, fetchZedAccount } from '../src/quotas/zed.js'
+import { readKiroAuth, kiroEndpointForArn, fetchKiroAccount } from '../src/quotas/kiro.js'
+import {
+  readGeminiCreds, extractOAuthClient, ensureFreshAccessToken, fetchGeminiAccount,
+} from '../src/quotas/gemini.js'
 import { QuotaPoller } from '../src/quotas/poller.js'
 import { PLAN_TTL_MS } from '../src/plan.js'
 import { parseScutilProxy } from '../src/quotas/proxy.js'
@@ -219,6 +231,387 @@ describe('trae', () => {
   })
 })
 
+// ---------- kimi ----------
+
+const KIMI_CODE_OK = {
+  usage: { limit: '7000', used: '1680', remaining: '5320', resetTime: '2026-09-15T00:00:00Z' },
+  limits: [{ window: { duration: 5, timeUnit: 'TIME_UNIT_HOUR' }, detail: { limit: '200', used: '50', remaining: '150', reset_at: 1789959588 } }],
+  user: { membership: { level: 'LEVEL_BASIC' } },
+}
+
+describe('kimi', () => {
+  it('凭据：env KIMI_CODE_API_KEY；文件 access_token 须未过期（> now+60s）', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'qx-'))
+    try {
+      await mkdir(join(home, '.kimi-code', 'credentials'), { recursive: true })
+      const future = Math.floor(Date.now() / 1000) + 3600
+      const past = Math.floor(Date.now() / 1000) - 3600
+      await writeFile(join(home, '.kimi-code', 'credentials', 'kimi-code.json'), JSON.stringify({ access_token: 'tok', refresh_token: 'r', expires_at: future }))
+      expect(readKimiAuth(home, {})).toMatchObject({ token: 'tok' })
+      await writeFile(join(home, '.kimi-code', 'credentials', 'kimi-code.json'), JSON.stringify({ access_token: 'tok', expires_at: past }))
+      expect(readKimiAuth(home, {})).toBeNull()
+      expect(readKimiAuth(home, { KIMI_CODE_API_KEY: ' env ' })).toEqual({ token: 'env', baseUrl: 'https://api.kimi.com' })
+    } finally { await rm(home, { recursive: true, force: true }) }
+  })
+  it('usages 归一：周额度绝对值 + 速率窗口；LEVEL_BASIC → Moderato', async () => {
+    const { fn, calls } = fakeFetch({ 'coding/v1/usages': KIMI_CODE_OK })
+    const acc = await fetchKimiAccount({ token: 't', baseUrl: 'https://api.kimi.com' }, fn, 1000)
+    expect(acc.available).toBe(true)
+    expect(acc.planName).toBe('Moderato')
+    expect(acc.windows[0]).toMatchObject({ key: 'week', total: 7000, used: 1680, remaining: 5320, percentage: 24, nextResetAt: Date.parse('2026-09-15T00:00:00Z') })
+    expect(acc.windows[1]).toMatchObject({ key: 'rate', total: 200, used: 50 })
+    expect(calls[0]!.init.headers!['x-msh-platform']).toBe('kimi_code_cli')
+    expect(calls[0]!.init.headers!['authorization']).toBe('Bearer t')
+  })
+})
+
+// ---------- grok ----------
+
+const GROK_OK = {
+  config: {
+    creditUsagePercent: 41.5,
+    currentPeriod: { end: '2026-10-01T00:00:00Z' },
+    onDemandCap: { val: 100 }, onDemandUsed: { val: 10 },
+    subscriptionTier: 'supergrok_heavy',
+  },
+}
+
+describe('grok', () => {
+  it('auth.json：优先 SuperGrok OIDC scope；expires_at 过期标记', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'qx-'))
+    try {
+      await mkdir(join(home, '.grok'), { recursive: true })
+      await writeFile(join(home, '.grok', 'auth.json'), JSON.stringify({
+        'https://accounts.x.ai/sign-in': { key: 'legacy-tok' },
+        'https://auth.x.ai::oidc': { key: 'oidc-tok' },
+      }))
+      expect(readGrokAuth(home, {})).toEqual({ token: 'oidc-tok', expired: false })
+      const stale = new Date(Date.now() - 3600_000).toISOString()
+      await writeFile(join(home, '.grok', 'auth.json'), JSON.stringify({ 'https://auth.x.ai::oidc': { key: 'oidc-tok', expires_at: stale } }))
+      expect(readGrokAuth(home, {})).toMatchObject({ expired: true })
+      expect(readGrokAuth(home, { GROK_OAUTH_TOKEN: ' env ' })).toEqual({ token: 'env', expired: false })
+    } finally { await rm(home, { recursive: true, force: true }) }
+  })
+  it('billing?format=credits：creditUsagePercent + 周期重置；supergrok_heavy → SuperGrok Heavy', async () => {
+    const { fn, calls } = fakeFetch({ 'v1/billing': GROK_OK })
+    const acc = await fetchGrokAccount({ token: 't', expired: false }, fn, 1000)
+    expect(acc.available).toBe(true)
+    expect(acc.planName).toBe('SuperGrok Heavy')
+    expect(acc.windows[0]).toMatchObject({ key: 'cycle', usedPercent: 41.5, nextResetAt: Date.parse('2026-10-01T00:00:00Z') })
+    expect(calls[0]!.init.headers!['x-xai-token-auth']).toBe('xai-grok-cli')
+    expect(calls[0]!.url).toContain('format=credits')
+  })
+  it('过期凭据 → error 账号且零网络', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'qx-'))
+    try {
+      await mkdir(join(home, '.grok'), { recursive: true })
+      const stale = new Date(Date.now() - 3600_000).toISOString()
+      await writeFile(join(home, '.grok', 'auth.json'), JSON.stringify({ 'https://auth.x.ai::oidc': { key: 't', expires_at: stale } }))
+      const { fn, calls } = fakeFetch({})
+      const acc = await grokAccount(home, {}, fn, Date.now())
+      expect(acc.available).toBe(false)
+      expect(acc.error).toContain('过期')
+      expect(calls).toHaveLength(0)
+    } finally { await rm(home, { recursive: true, force: true }) }
+  })
+})
+
+// ---------- copilot ----------
+
+const COPILOT_OK = {
+  copilot_plan: 'individual',
+  quota_reset_date: '2026-10-01',
+  quota_snapshots: {
+    premium_interactions: { entitlement: 300, remaining: 210, percent_remaining: 70 },
+    chat: { unlimited: true },
+  },
+}
+
+describe('copilot', () => {
+  it('quota_snapshots：premium 百分比换算、unlimited 丢弃；Copilot 伪装头', async () => {
+    const { fn, calls } = fakeFetch({ 'copilot_internal/user': COPILOT_OK })
+    const acc = await fetchCopilotAccount('gh-tok', fn, 1000)
+    expect(acc.available).toBe(true)
+    expect(acc.planName).toBe('individual')
+    expect(acc.windows.map(w => w.key)).toEqual(['premium'])
+    expect(acc.windows[0]).toMatchObject({ total: 300, remaining: 210, usedPercent: 30, nextResetAt: Date.parse('2026-10-01') })
+    expect(calls[0]!.init.headers!.authorization).toBe('token gh-tok')
+    expect(calls[0]!.init.headers!['editor-version']).toBe('vscode/1.96.2')
+    expect(readCopilotAuth({ COPILOT_API_TOKEN: ' t ' })).toBe('t')
+  })
+})
+
+// ---------- openrouter ----------
+
+describe('openrouter', () => {
+  it('credits → 余额窗口；/key 限额失败不影响主快照', async () => {
+    const { fn, calls } = fakeFetch({
+      '/credits': { data: { total_credits: 100, total_usage: 37 } },
+      '/key': { data: { limit: 50, limit_remaining: 20, usage: 30, limit_reset: 'monthly' } },
+    })
+    const acc = await fetchOpenRouterAccount({ token: 't', baseUrl: 'https://openrouter.ai/api/v1' }, fn, 1000)
+    expect(acc.available).toBe(true)
+    expect(acc.windows[0]).toMatchObject({ key: 'credits', total: 100, used: 37, remaining: 63, percentage: 37 })
+    expect(acc.windows[1]).toMatchObject({ key: 'limit', total: 50, used: 30, remaining: 20 })
+    expect(calls[0]!.init.headers!.authorization).toBe('Bearer t')
+  })
+  it('env 缺失 → no_credentials；API_URL 可覆盖', () => {
+    expect(readOpenRouterAuth({})).toBeNull()
+    expect(readOpenRouterAuth({ OPENROUTER_API_KEY: 'k', OPENROUTER_API_URL: 'https://proxy.example/v1/' }))
+      .toEqual({ token: 'k', baseUrl: 'https://proxy.example/v1' })
+  })
+})
+
+// ---------- codebuff ----------
+
+describe('codebuff', () => {
+  it('凭据：env；credentials.json 兼容 authToken 与 default.authToken', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'qx-'))
+    try {
+      await mkdir(join(home, '.config', 'manicode'), { recursive: true })
+      await writeFile(join(home, '.config', 'manicode', 'credentials.json'), JSON.stringify({ default: { authToken: 'nested' } }))
+      expect(readCodebuffAuth(home, {})).toMatchObject({ token: 'nested' })
+      await writeFile(join(home, '.config', 'manicode', 'credentials.json'), JSON.stringify({ authToken: 'flat' }))
+      expect(readCodebuffAuth(home, {})).toMatchObject({ token: 'flat' })
+      expect(readCodebuffAuth(home, { CODEBUFF_API_KEY: 'env' })).toMatchObject({ token: 'env' })
+    } finally { await rm(home, { recursive: true, force: true }) }
+  })
+  it('usage 是 POST + Bearer；usage/quota → 积分窗口，subscription.rateLimit → 周窗口', async () => {
+    const { fn, calls } = fakeFetch({
+      '/api/v1/usage': { usage: 120, quota: 1000, remainingBalance: 880, next_quota_reset: '2026-10-01T00:00:00Z' },
+      '/api/user/subscription': { subscription: { displayName: 'Pro', status: 'active' }, rateLimit: { weeklyUsed: 40, weeklyLimit: 200, weeklyResetsAt: 1789959588 } },
+    })
+    const acc = await fetchCodebuffAccount({ token: 't', baseUrl: 'https://www.codebuff.com' }, fn, 1000)
+    expect(acc.available).toBe(true)
+    expect(acc.planName).toBe('Pro')
+    expect(acc.windows[0]).toMatchObject({ key: 'credits', total: 1000, used: 120, remaining: 880, percentage: 12, nextResetAt: Date.parse('2026-10-01T00:00:00Z') })
+    expect(acc.windows[1]).toMatchObject({ key: 'week', total: 200, used: 40, percentage: 20, nextResetAt: 1789959588000 })
+    expect(calls[0]!.init.method).toBe('POST')
+    expect(calls[0]!.init.headers!.authorization).toBe('Bearer t')
+  })
+})
+
+// ---------- factory ----------
+
+const FACTORY_LIMITS = {
+  usesTokenRateLimitsBilling: true,
+  limits: {
+    standard: {
+      fiveHour: { usedPercent: 22, secondsRemaining: 3600 },
+      weekly: { usedPercent: 10, windowEnd: '2026-09-21T00:00:00Z' },
+      monthly: { usedPercent: 5, windowEnd: 1789959588 },
+    },
+    core: null,
+  },
+  extraUsageBalanceCents: 0,
+}
+
+describe('factory', () => {
+  it('凭据：env；~/.factory/.env 支持 export 前缀与引号', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'qx-'))
+    try {
+      await mkdir(join(home, '.factory'), { recursive: true })
+      await writeFile(join(home, '.factory', '.env'), '# comment\nexport FACTORY_API_KEY="fk-file"\nOTHER=1\n')
+      expect(readFactoryApiKey(home, {})).toBe('fk-file')
+      expect(readFactoryApiKey(home, { FACTORY_API_KEY: 'fk-env' })).toBe('fk-env')
+    } finally { await rm(home, { recursive: true, force: true }) }
+  })
+  it('billing/limits：5h/周/月三窗口；secondsRemaining 优先；过期 windowEnd 视为 0%', async () => {
+    const now = Date.parse('2026-09-14T12:00:00Z')
+    const { fn, calls } = fakeFetch({ '/api/billing/limits': FACTORY_LIMITS })
+    const acc = await fetchFactoryAccount('fk', fn, now)
+    expect(acc.available).toBe(true)
+    expect(acc.windows[0]).toMatchObject({ key: 'fiveHour', usedPercent: 22, nextResetAt: now + 3600_000 })
+    expect(acc.windows[1]).toMatchObject({ key: 'week', usedPercent: 10, nextResetAt: Date.parse('2026-09-21T00:00:00Z') })
+    expect(acc.windows[2]).toMatchObject({ key: 'cycle', usedPercent: 5, nextResetAt: 1789959588000 })
+    expect(calls[0]!.url).toContain('https://api.factory.ai')
+    // 过期窗口：windowEnd 在过去且无 secondsRemaining → 0%
+    const expired = { limits: { standard: { fiveHour: { usedPercent: 99, windowEnd: '2020-01-01T00:00:00Z' }, weekly: { usedPercent: 1 }, monthly: { usedPercent: 1 } } } }
+    const { fn: fn2 } = fakeFetch({ '/api/billing/limits': expired })
+    const acc2 = await fetchFactoryAccount('fk', fn2, now)
+    expect(acc2.windows[0]!.usedPercent).toBe(0)
+  })
+})
+
+// ---------- minimax ----------
+
+const MINIMAX_OK = {
+  data: {
+    base_resp: { status_code: 0 },
+    model_remains: [{
+      model_name: 'abab-mini',
+      current_interval_total_count: 500, current_interval_usage_count: 400,
+      current_interval_remaining_percent: 20, end_time: 1789372788,
+      current_weekly_total_count: 2000, current_weekly_usage_count: 1000, weekly_end_time: 1789959588,
+    }],
+  },
+}
+
+describe('minimax', () => {
+  it('usage_count 是剩余量：used = total - remaining；remaining_percent 兜底', async () => {
+    const { fn, calls } = fakeFetch({ 'token_plan/remains': MINIMAX_OK })
+    const acc = await fetchMiniMaxAccount({ token: 't', regions: [{ apiBase: 'https://api.minimax.io' }] }, fn, 1000)
+    expect(acc.available).toBe(true)
+    expect(acc.windows[0]).toMatchObject({ key: 'fiveHour', total: 500, used: 100, remaining: 400, percentage: 20, nextResetAt: 1789372788000 })
+    expect(acc.windows[1]).toMatchObject({ key: 'week', total: 2000, used: 1000, percentage: 50 })
+    expect(calls[0]!.init.headers!['mm-api-source']).toBe('wattson-usage')
+  })
+  it('国际端点失败 → 回退中国端点；MINIMAX_REGION=cn 调换顺序', async () => {
+    const calls: string[] = []
+    const fn = async (url: string) => {
+      calls.push(url)
+      if (url.includes('minimax.io')) throw Object.assign(new Error('HTTP 502'), { quotaHttpStatus: 502 })
+      return { ok: true, status: 200, json: async () => MINIMAX_OK }
+    }
+    const acc = await fetchMiniMaxAccount({ token: 't', regions: [{ apiBase: 'https://api.minimax.io' }, { apiBase: 'https://api.minimaxi.com' }] }, fn, 1000)
+    expect(acc.available).toBe(true)
+    expect(calls[0]).toContain('minimax.io')
+    // 国际区两条路径都失败后，才切到中国区
+    expect(calls[1]).toContain('minimax.io/v1/api/openplatform')
+    expect(calls[2]).toContain('minimaxi.com')
+    expect(readMiniMaxAuth({ MINIMAX_API_KEY: 'k', MINIMAX_REGION: 'cn' })!.regions[0]!.apiBase).toBe('https://api.minimaxi.com')
+  })
+})
+
+// ---------- zed ----------
+
+const ZED_OK = {
+  user: { id: 42, github_login: 'octocat' },
+  plan: {
+    plan_v3: 'zed_pro',
+    subscription_period: { started_at: '2026-09-01T00:00:00Z', ended_at: '2026-10-01T00:00:00Z' },
+    usage: { edit_predictions: { used: 300, limit: 1000 } },
+  },
+}
+
+describe('zed', () => {
+  it('env 凭据须 token+userId 成对；默认不读钥匙串', async () => {
+    expect(await readZedAuth({ ZED_ACCESS_TOKEN: 't' })).toBeNull()
+    expect(await readZedAuth({ ZED_ACCESS_TOKEN: 't', ZED_USER_ID: '42' })).toEqual({ userId: '42', token: 't' })
+    expect(await readZedAuth({}, { findInternet: true } as never)).toBeNull()
+  })
+  it('users/me：edit_predictions 窗口 + 账期进度；Authorization 为 "<uid> <tok>"', async () => {
+    const now = Date.parse('2026-09-15T00:00:00Z')
+    const { fn, calls } = fakeFetch({ 'client/users/me': ZED_OK })
+    const acc = await fetchZedAccount({ userId: '42', token: 't' }, fn, now)
+    expect(acc.available).toBe(true)
+    expect(acc.planName).toBe('zed_pro')
+    expect(acc.windows[0]).toMatchObject({ key: 'editPredictions', total: 1000, used: 300, remaining: 700, percentage: 30, nextResetAt: Date.parse('2026-10-01T00:00:00Z') })
+    // 账期 14/30 天 → ~46.7%
+    expect(acc.windows[1]!.key).toBe('cycle')
+    expect(acc.windows[1]!.percentage).toBeCloseTo(46.7, 0)
+    expect(calls[0]!.init.headers!.authorization).toBe('42 t')
+  })
+})
+
+// ---------- kiro ----------
+
+const KIRO_OK = {
+  usageBreakdownList: [{
+    resourceType: 'CREDIT',
+    usageLimitWithPrecision: 100,
+    currentUsageWithPrecision: 45.5,
+    currentOveragesWithPrecision: 5.5,
+    nextDateReset: 1789959588,
+  }],
+}
+
+describe('kiro', () => {
+  it('凭据：env 优先；kiro-cli SQLite 经注入的 sqlite3 读取', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'qx-'))
+    try {
+      const dataDir = join(home, 'kiro-cli-data')
+      await mkdir(dataDir, { recursive: true })
+      await writeFile(join(dataDir, 'data.sqlite3'), 'not-a-real-db')
+      const run = async (_file: string, args: string[]) => {
+        const sql = args[2] ?? args.at(-1) ?? ''
+        if (sql.includes('auth_kv')) return { stdout: JSON.stringify([{ value: JSON.stringify({ access_token: 'tok' }) }]), stderr: '' }
+        return { stdout: JSON.stringify([{ value: JSON.stringify({ arn: 'arn:aws:codewhisperer:us-east-1:123:profile/default' }) }]), stderr: '' }
+      }
+      expect(await readKiroAuth(home, { KIRO_DATA_DIR: dataDir }, run)).toEqual({
+        accessToken: 'tok',
+        profileArn: 'arn:aws:codewhisperer:us-east-1:123:profile/default',
+      })
+      expect(await readKiroAuth(home, { KIRO_ACCESS_TOKEN: 'e', KIRO_PROFILE_ARN: 'arn' }, run)).toEqual({ accessToken: 'e', profileArn: 'arn' })
+    } finally { await rm(home, { recursive: true, force: true }) }
+  })
+  it('ARN → 端点映射；CREDIT 条目扣除 overage；nextDateReset 秒 → 毫秒', async () => {
+    expect(kiroEndpointForArn('arn:aws:codewhisperer:us-east-1:123:profile/default')).toBe('https://codewhisperer.us-east-1.amazonaws.com/')
+    expect(kiroEndpointForArn('arn:aws:codewhisperer:eu-central-1:123:profile/default')).toBe('https://q.eu-central-1.amazonaws.com/')
+    expect(kiroEndpointForArn('arn:aws:s3:::bucket')).toBeNull()
+    const { fn, calls } = fakeFetch({ 'amazonaws.com': KIRO_OK })
+    const acc = await fetchKiroAccount({ accessToken: 't', profileArn: 'arn:aws:codewhisperer:us-east-1:123:profile/default' }, fn, 1000)
+    expect(acc.available).toBe(true)
+    // planUsed = 45.5 - 5.5 = 40
+    expect(acc.windows[0]).toMatchObject({ key: 'cycle', total: 100, used: 40, remaining: 60, percentage: 40, nextResetAt: 1789959588000 })
+    expect(calls[0]!.init.headers!['x-amz-target']).toBe('AmazonCodeWhispererService.GetUsageLimits')
+    expect(JSON.parse(calls[0]!.init.body!)).toEqual({ profileArn: 'arn:aws:codewhisperer:us-east-1:123:profile/default' })
+  })
+})
+
+// ---------- gemini ----------
+
+describe('gemini', () => {
+  it('settings.json api-key 模式 → 无凭据；oauth_creds.json 解析；client 从 env 直取', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'qx-'))
+    try {
+      await mkdir(join(home, '.gemini'), { recursive: true })
+      await writeFile(join(home, '.gemini', 'settings.json'), JSON.stringify({ security: { auth: { selectedType: 'api-key' } } }))
+      await writeFile(join(home, '.gemini', 'oauth_creds.json'), JSON.stringify({ access_token: 't' }))
+      expect(readGeminiCreds(home, {})).toBeNull()
+      await writeFile(join(home, '.gemini', 'settings.json'), JSON.stringify({ security: { auth: { selectedType: 'oauth-personal' } } }))
+      const creds = readGeminiCreds(home, {
+        GEMINI_OAUTH_CLIENT_ID: 'cid', GEMINI_OAUTH_CLIENT_SECRET: 'csec',
+      })
+      expect(creds).toMatchObject({ accessToken: 't', clientId: 'cid', clientSecret: 'csec' })
+    } finally { await rm(home, { recursive: true, force: true }) }
+  })
+  it('OAuth client 可从 GEMINI_OAUTH2_JS_PATH 指向的 gemini-cli 源码抽取', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'qx-'))
+    try {
+      const js = join(home, 'oauth2.js')
+      await writeFile(js, 'export const CLIENT_ID = "cid-from-file"\nexport const CLIENT_SECRET = "csec-from-file"\n')
+      expect(extractOAuthClient(home, { GEMINI_OAUTH2_JS_PATH: js })).toEqual({ clientId: 'cid-from-file', clientSecret: 'csec-from-file' })
+    } finally { await rm(home, { recursive: true, force: true }) }
+  })
+  it('access_token 过期 → 用 refresh_token 静默刷新并回写 oauth_creds.json', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'qx-'))
+    try {
+      await mkdir(join(home, '.gemini'), { recursive: true })
+      const credsPath = join(home, '.gemini', 'oauth_creds.json')
+      await writeFile(credsPath, JSON.stringify({ access_token: 'stale', refresh_token: 'r', expiry_date: 1000 }))
+      const { fn, calls } = fakeFetch({ 'oauth2.googleapis.com': { access_token: 'fresh', expires_in: 3600 } })
+      const creds = { accessToken: 'stale', refreshToken: 'r', expiryMs: 1000, clientId: 'cid', clientSecret: 'csec', credsPath }
+      expect(await ensureFreshAccessToken(creds, fn, 1_000_000)).toBe('fresh')
+      expect(calls[0]!.init.headers!['content-type']).toBe('application/x-www-form-urlencoded')
+      const written = JSON.parse(await import('node:fs/promises').then(fs => fs.readFile(credsPath, 'utf8')))
+      expect(written.access_token).toBe('fresh')
+      expect(written.expiry_date).toBe(1_000_000 + 3600_000)
+    } finally { await rm(home, { recursive: true, force: true }) }
+  })
+  it('loadCodeAssist → retrieveUserQuota：每模型取最低 remaining_fraction；tier → 套餐名', async () => {
+    const { fn, calls } = fakeFetch({
+      'loadCodeAssist': { currentTier: 'standard-tier', cloudaicompanionProject: 'gen-lang-client-001' },
+      'retrieveUserQuota': {
+        buckets: [
+          { model_id: 'gemini-2.5-pro', remaining_fraction: 0.9, reset_time: '2026-09-15T00:00:00Z', token_type: 'INPUT' },
+          { model_id: 'gemini-2.5-pro', remaining_fraction: 0.5, reset_time: '2026-09-15T00:00:00Z', token_type: 'OUTPUT' },
+          { model_id: 'gemini-2.5-flash', remaining_fraction: 0.7, reset_time: '2026-09-15T00:00:00Z', token_type: 'INPUT' },
+        ],
+      },
+    })
+    const creds = { accessToken: 't', refreshToken: null, expiryMs: null, clientId: null, clientSecret: null, credsPath: '/x' }
+    const acc = await fetchGeminiAccount(creds, fn, 1000)
+    expect(acc.available).toBe(true)
+    expect(acc.planName).toBe('Standard')
+    expect(acc.windows.map(w => w.key)).toEqual(['gemini-2.5-pro', 'gemini-2.5-flash'])
+    expect(acc.windows[0]).toMatchObject({ usedPercent: 50, percentage: 50 })
+    expect(acc.windows[1]!.usedPercent).toBeCloseTo(30, 6)
+    const quotaCall = calls.find(c => c.url.includes('retrieveUserQuota'))
+    expect(JSON.parse(quotaCall!.init.body!)).toEqual({ project: 'gen-lang-client-001' })
+  })
+})
+
 // ---------- QuotaPoller ----------
 
 describe('QuotaPoller', () => {
@@ -250,11 +643,11 @@ describe('QuotaPoller', () => {
     await poller.current()
     expect(calls.length).toBeGreaterThan(n)
   })
-  it('全部无凭据 → 六个账号 no_credentials 且零网络', async () => {
+  it('全部无凭据 → 16 个账号 no_credentials 且零网络', async () => {
     const { fn, calls } = fakeFetch({})
     const poller = new QuotaPoller({ home: '/nonexistent', env: {}, fetchImpl: fn })
     const snap = await poller.current()
-    expect(snap.accounts).toHaveLength(6)
+    expect(snap.accounts).toHaveLength(16)
     expect(snap.accounts.every(a => a.unavailableReason === 'no_credentials')).toBe(true)
     expect(calls).toHaveLength(0)
   })
