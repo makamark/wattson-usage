@@ -1,4 +1,4 @@
-// Quotas/Kimi.swift — Kimi 订阅额度（移植 CodexBar KimiUsageFetcher 的 Code API 口径）：
+// Quotas/Kimi.swift — Kimi 订阅额度（原生实现，Code API 口径）：
 // 凭据 = env KIMI_CODE_API_KEY 或 ~/.kimi-code/credentials/kimi-code.json（须未过期）；
 // GET {base}/coding/v1/usages，头 Bearer + X-Msh-Platform: kimi_code_cli；
 // usage.detail = 周额度（绝对值），limits[0].detail = 速率窗口。
@@ -13,7 +13,7 @@ public struct KimiAuth: Sendable, Equatable {
     }
 }
 
-/// Kimi 会员档位 → 展示名（对齐 CodexBar KimiCodeAPIUsageResponse.User.Membership）
+/// Kimi 会员档位 → 展示名（原生实现口径）
 public func kimiPlanName(level: String?) -> String? {
     switch level?.trimmingCharacters(in: .whitespaces).uppercased() {
     case "LEVEL_FREE": return "Adagio"

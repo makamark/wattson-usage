@@ -16,7 +16,12 @@ public func resolveExecutable(_ file: String) -> String {
 
 /// 运行外部命令并捕获 stdout/stderr；非零退出 / 启动失败抛错。5 秒超时。
 public func runProcess(_ file: String, _ args: [String]) async throws -> (stdout: String, stderr: String) {
-    try await withThrowingTaskGroup(of: (String, String).self) { group in
+    enum RunOutcome: Sendable {
+        case done(stdout: String, stderr: String)
+        case timedOut
+        case failed(String)
+    }
+    let outcome = try await withThrowingTaskGroup(of: RunOutcome.self) { group -> RunOutcome in
         group.addTask {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: resolveExecutable(file))
@@ -24,23 +29,38 @@ public func runProcess(_ file: String, _ args: [String]) async throws -> (stdout
             let out = Pipe(), err = Pipe()
             p.standardOutput = out
             p.standardError = err
-            try p.run()
+            do {
+                try p.run()
+            } catch {
+                return .failed("无法启动 \(file): \(error.localizedDescription)")
+            }
             let outData = out.fileHandleForReading.readDataToEndOfFile()
             let errData = err.fileHandleForReading.readDataToEndOfFile()
             p.waitUntilExit()
             guard p.terminationStatus == 0 else {
-                throw HTTPStatusError(status: 0, message: "\(file) 退出码 \(p.terminationStatus)")
+                return .failed("\(file) 退出码 \(p.terminationStatus)")
             }
-            return (String(data: outData, encoding: .utf8) ?? "",
-                    String(data: errData, encoding: .utf8) ?? "")
+            return .done(stdout: String(data: outData, encoding: .utf8) ?? "",
+                         stderr: String(data: errData, encoding: .utf8) ?? "")
         }
         group.addTask {
-            try await Task.sleep(nanoseconds: 5_000_000_000)
-            throw HTTPStatusError(status: 0, message: "\(file) 执行超时")
+            // 超时哨兵：被取消时吞掉 CancellationError，正常返回 timedOut，
+            // 避免组收尾把取消错误误当运行结果抛出
+            do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch {}
+            return .timedOut
         }
-        let (stdout, stderr) = try await group.next()!
+        let first = try await group.next()!
         group.cancelAll()
+        _ = try? await group.next()
+        return first
+    }
+    switch outcome {
+    case .done(let stdout, let stderr):
         return (stdout: stdout, stderr: stderr)
+    case .failed(let message):
+        throw HTTPStatusError(status: 0, message: message)
+    case .timedOut:
+        throw HTTPStatusError(status: 0, message: "\(file) 执行超时")
     }
 }
 

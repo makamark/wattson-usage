@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-  <!-- 托盘 template 图标：纯黑 + alpha，macOS 自动适配深浅菜单栏。
-       闪电几何与 build/icon.svg / web/src/icons.ts 同源（16 栅格 ×1.7 居中）；
-       位图由 scripts/gen-tray.js 生成（trayTemplate.png / @2x）。 -->
-  <path transform="translate(2.4 2.4) scale(1.7)" d="M8.8 1.2 3 9.4h3.8L6.4 14.8 13 6.4H9Z" fill="#000"/>
-</svg>

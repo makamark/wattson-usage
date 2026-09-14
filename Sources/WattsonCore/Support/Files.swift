@@ -6,6 +6,24 @@ public func readTextFile(_ path: String) -> String? {
     return String(data: data, encoding: .utf8)
 }
 
+public func readDataFile(_ path: String) -> Data? {
+    FileManager.default.contents(atPath: path)
+}
+
+/// 按字节逐行迭代（不物化整文件 String；大 JSONL 扫描的热路径）
+public func forEachLine(_ data: Data, _ body: (Data) throws -> Void) rethrows {
+    var start = data.startIndex
+    var i = start
+    while i < data.endIndex {
+        if data[i] == 0x0A {
+            if i > start { try body(data.subdata(in: start..<i)) }
+            start = data.index(after: i)
+        }
+        i = data.index(after: i)
+    }
+    if start < data.endIndex { try body(data.subdata(in: start..<data.endIndex)) }
+}
+
 public func writeTextFile(_ path: String, _ content: String) -> Bool {
     do {
         try content.write(toFile: path, atomically: true, encoding: .utf8)

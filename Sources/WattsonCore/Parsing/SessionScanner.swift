@@ -104,12 +104,16 @@ func parseClaudeProject(_ projectsDir: String) -> [(path: String, file: CachedFi
         guard FileManager.default.fileExists(atPath: dir, isDirectory: &isDir), isDir.boolValue else { continue }
         for name in listDirectory(dir) where name.hasSuffix(".jsonl") {
             let path = (dir as NSString).appendingPathComponent(name)
-            guard let raw = readTextFile(path) else { continue }
+            guard let raw = readDataFile(path) else { continue }
             var calls: [CachedCall] = []
-            for line in raw.split(separator: "\n", omittingEmptySubsequences: true) {
-                guard let entry = try? JSON.parse(String(line)) else { continue }
-                guard entry["type"]?.str == "assistant" || entry["type"] == nil else { continue }
-                guard let usageNode = entry["message"]?["usage"], usageNode.obj != nil else { continue }
+            let mAssistant = Data("\"assistant\"".utf8)
+            let mUsage = Data("\"usage\"".utf8)
+            forEachLine(raw) { line in
+                // 预过滤：只解析同时含 assistant 与 usage 标记的行（绝大多数行直接跳过）
+                guard line.range(of: mAssistant) != nil, line.range(of: mUsage) != nil else { return }
+                guard let entry = try? JSON.parse(line) else { return }
+                guard entry["type"]?.str == "assistant" || entry["type"] == nil else { return }
+                guard let usageNode = entry["message"]?["usage"], usageNode.obj != nil else { return }
                 let ts = entry["timestamp"]?.str ?? ""
                 // project 优先取条目 cwd，回退目录 slug
                 let project = entry["cwd"]?.str ?? slug
@@ -174,24 +178,30 @@ func parseCodexSessions(_ codexHome: String) -> [(path: String, file: CachedFile
 }
 
 func parseCodexRollout(_ path: String) -> CachedFile? {
-    guard let raw = readTextFile(path) else { return nil }
+    guard let raw = readDataFile(path) else { return nil }
     var lastUsage: CachedUsage?
     var lastTs = ""
     var model: String?
     var project: String?
     var sessionId: String?
-    for line in raw.split(separator: "\n", omittingEmptySubsequences: true) {
-        guard let entry = try? JSON.parse(String(line)) else { continue }
+    let mTokenCount = Data("\"token_count\"".utf8)
+    let mSessionMeta = Data("\"session_meta\"".utf8)
+    // 预过滤：只解析 token_count（用量）与 session_meta（元数据）行，跳过其余绝大多数事件
+    forEachLine(raw) { line in
+        let isTokenCount = line.range(of: mTokenCount) != nil
+        let isSessionMeta = line.range(of: mSessionMeta) != nil
+        guard isTokenCount || isSessionMeta else { return }
+        guard let entry = try? JSON.parse(line) else { return }
         if let sid = entry["session_id"]?.str { sessionId = sid }
         if let cwd = entry["payload"]?["cwd"]?.str ?? entry["cwd"]?.str { project = cwd }
         if let m = entry["payload"]?["model"]?.str ?? entry["payload"]?["model_id"]?.str
             ?? entry["payload"]?["info"]?["model_id"]?.str { model = m }
+        guard isTokenCount else { return }
         // 形状一：token_count 事件 payload.info.total_token_usage（累计值）
         var total: JSON? = entry["payload"]?["info"]?["total_token_usage"]
-        let isTokenCount = entry["payload"]?["type"]?.str == "token_count"
         // 形状二：直接挂 total_token_usage 的历史格式
         if total == nil { total = entry["payload"]?["total_token_usage"] ?? entry["total_token_usage"] }
-        guard let t = total, t.obj != nil, isTokenCount || total?["input_tokens"] != nil else { continue }
+        guard let t = total, t.obj != nil else { return }
         let input = aggNum(t["input_tokens"])
         let cached = aggNum(t["cached_input_tokens"])
         let output = aggNum(t["output_tokens"])
@@ -216,10 +226,14 @@ func parseCodexRollout(_ path: String) -> CachedFile? {
 // MARK: - zcode（SQLite：session / model_usage 投影）
 
 func parseZcodeDatabase(_ dbPath: String, run: RunLike) async -> CachedFile? {
+    // 只取任一 token 维度非零的行（与解析口径一致），避免大库全量 JSON dump
     let usageRows = await sqliteJSONRows(run, dbPath, """
         SELECT session_id, turn_id, model_id, input_tokens, output_tokens, reasoning_tokens,
                cache_creation_input_tokens, cache_read_input_tokens, started_at, completed_at
-        FROM model_usage ORDER BY rowid
+        FROM model_usage
+        WHERE input_tokens > 0 OR output_tokens > 0 OR reasoning_tokens > 0
+           OR cache_read_input_tokens > 0 OR cache_creation_input_tokens > 0
+        ORDER BY rowid
         """)
     guard !usageRows.isEmpty else { return nil }
     let sessionRows = await sqliteJSONRows(run, dbPath, "SELECT id, directory FROM session")

@@ -1,7 +1,0 @@
-node_modules/
-dist/
-release/
-build/cli/
-build/menubar/
-*.log
-.vite/

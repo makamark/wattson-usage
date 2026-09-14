@@ -12,8 +12,8 @@ export PATH
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # AGG_CONFIG 重定向配置文件（菜单栏客户端打包态用），默认仓库根 agg.config.json
 CONFIG="${AGG_CONFIG:-$ROOT/agg.config.json}"
-# MIRROR_BASE 可重定向镜像根（测试隔离用），默认 ~/codeburn-agg/mirror
-MIRROR_BASE="${MIRROR_BASE:-$HOME/codeburn-agg/mirror}"
+# MIRROR_BASE 可重定向镜像根（测试隔离用），默认 ~/wattson/mirror
+MIRROR_BASE="${MIRROR_BASE:-$HOME/wattson/mirror}"
 LOG_TAG="[mirror]"
 
 # 日志走 stderr：设备循环用 stdout 传每台设备的终态词（ok/failed/skipped/busy），

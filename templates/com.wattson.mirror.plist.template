@@ -8,6 +8,6 @@
   </array>
   <key>StartInterval</key><integer>1800</integer>
   <key>RunAtLoad</key><true/>
-  <key>StandardOutPath</key><string>@@HOME@@/codeburn-agg/mirror.log</string>
-  <key>StandardErrorPath</key><string>@@HOME@@/codeburn-agg/mirror.log</string>
+  <key>StandardOutPath</key><string>@@HOME@@/wattson/mirror.log</string>
+  <key>StandardErrorPath</key><string>@@HOME@@/wattson/mirror.log</string>
 </dict></plist>

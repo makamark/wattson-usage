@@ -12,7 +12,7 @@ public struct GrokAuth: Sendable, Equatable {
     }
 }
 
-/// SuperGrok / SuperGrok Heavy 档位名归一（对齐 CodexBar GrokPlan.displayName）
+/// SuperGrok / SuperGrok Heavy 档位名归一（原生实现口径）
 public func grokPlanName(level: String?) -> String? {
     let trimmed = level?.trimmingCharacters(in: .whitespaces) ?? ""
     if trimmed.isEmpty { return nil }

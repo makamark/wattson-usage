@@ -25,15 +25,15 @@ Codex 首次同步仍约 487 MiB，后续是新增文件及旧文件修改块，
 
 ## 方案与数据兼容性
 
-`codeburn/src/providers/zcode.ts` 实际读取：
+原生解析器（`Sources/WattsonCore/Parsing/SessionScanner.swift`）实际读取：
 
 - session：id、directory。
 - model_usage：id、session_id、turn_id、model_id、五种 token 字段、started_at、completed_at。
 - tool_usage：session_id、turn_id、tool_name、started_at。
 
-turn_usage 并未被此 provider 查询。通过 ATTACH + 单一事务导出以上全部历史行，保留查询字段，并建立两个 session_id 索引。沿用 provider 做 token 拆分、去重与价格计算；没有增加远端 JSON 解析或 Node/Python 依赖。当前副本 214/4044/5643 行的保留字段已与原库逐行一致核对。导出库 2.02 MiB，比 VACUUM 库缩小 98.9%。原库 part 表占 139100160 B，正文是明显冗余来源。
+turn_usage 并未被此 provider 查询。通过 ATTACH + 单一事务导出以上全部历史行，保留查询字段，并建立两个 session_id 索引。沿用原生解析器做 token 拆分、去重与价格计算；没有增加远端 JSON 解析或额外依赖。当前副本 214/4044/5643 行的保留字段已与原库逐行一致核对。导出库 2.02 MiB，比 VACUUM 库缩小 98.9%。原库 part 表占 139100160 B，正文是明显冗余来源。
 
-WorkBuddy 仅 256 KiB，保留原 VACUUM。新库仍位于 mirror/<设备>/zcode/db.sqlite 和 workbuddy/db.sqlite，app/config 与 server 采集无需修改。新导出失败或字段不兼容时非零退出并保留旧镜像，不静默退回大库或发布半成品。
+WorkBuddy 仅 256 KiB，保留原 VACUUM。新库仍位于 mirror/<设备>/zcode/db.sqlite 和 workbuddy/db.sqlite，设备配置与采集管线无需修改。新导出失败或字段不兼容时非零退出并保留旧镜像，不静默退回大库或发布半成品。
 
 本地先复制正式库到临时目标作为 rsync 基准，成功后 mv 原子替换；不使用硬链接或 --inplace。`-I` 防止同秒同大小快照被跳过。4 KiB 对齐本次测得的页，不能保证重排后所有逻辑未改数据都匹配；其它页大小仍保证正确性。首次由大镜像迁移时可能有一次较大的本地复制，之后基准仅约 2 MiB。
 

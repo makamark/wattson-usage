@@ -3,14 +3,13 @@
 <plist version="1.0"><dict>
   <key>Label</key><string>com.wattson.server</string>
   <key>ProgramArguments</key><array>
-    <string>@@NODE@@</string>
-    <string>--import</string>
-    <string>tsx</string>
-    <string>src/main.ts</string>
+    <string>@@BIN@@/wattson-server</string>
   </array>
-  <key>WorkingDirectory</key><string>@@ROOT@@/server</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>WATTSON_CONFIG</key><string>@@ROOT@@/agg.config.json</string>
+  </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>@@HOME@@/codeburn-agg/server.log</string>
-  <key>StandardErrorPath</key><string>@@HOME@@/codeburn-agg/server.log</string>
+  <key>StandardOutPath</key><string>@@HOME@@/wattson/server.log</string>
+  <key>StandardErrorPath</key><string>@@HOME@@/wattson/server.log</string>
 </dict></plist>

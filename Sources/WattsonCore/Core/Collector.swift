@@ -64,7 +64,8 @@ public final class Collector: @unchecked Sendable {
         let task = Task<Snapshot, Never> { await self.performRefresh(start) }
         inflight = task
         lock.unlock()
-        return await task.value
+        let v = await task.value
+        return v
     }
 
     private func performRefresh(_ start: Snapshot) async -> Snapshot {

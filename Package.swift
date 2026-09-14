@@ -15,6 +15,12 @@ let package = Package(
             dependencies: ["WattsonCore"],
             path: "Sources/WattsonApp"
         ),
+        // 无头 API 服务器（launchd 常驻 / 远端中心机部署）
+        .executableTarget(
+            name: "wattson-server",
+            dependencies: ["WattsonCore"],
+            path: "Sources/wattson-server"
+        ),
         .testTarget(
             name: "WattsonCoreTests",
             dependencies: ["WattsonCore"],
