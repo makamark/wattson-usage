@@ -343,8 +343,8 @@ private struct MainChartSection: View {
 }
 
 /// 堆叠柱状图（ECharts 主图的 Swift Charts 等价）：
-/// hover 明细 tooltip（该时间点全部非零系列按用量降序 + 合计）+
-/// 可点击图例开关系列（对齐 ECharts legend.selected 行为）。
+/// 分类轴（每时间桶一个类目，柱与标签同心）+ hover 明细 tooltip +
+/// 可点击图例开关系列。
 struct SeriesChart: View {
     let result: SeriesResult
     let metric: MetricOption
@@ -352,10 +352,12 @@ struct SeriesChart: View {
 
     /// 用户手动隐藏的系列（图例点击开关；原 ECharts legend.selected）
     @State private var hiddenKeys: Set<String> = []
-    /// 当前 hover 的时间桶索引（nil = 无提示框）
+    /// 当前 hover 的桶索引（nil = 无提示框）
     @State private var hoverIndex: Int?
-    /// hover 点在图表坐标系中的 x 位置（tooltip 定位用）
+    /// hover 桶中心的 plot 区 x（tooltip 定位用）
     @State private var hoverX: CGFloat = 0
+    /// plot 区相对整个 Chart 的偏移（换算坐标用）
+    @State private var plotOriginX: CGFloat = 0
 
     /// 系列顺序 = 字典序，「其他/其他*」固定排最后（配色稳定）
     private var allKeys: [String] {
@@ -388,6 +390,46 @@ struct SeriesChart: View {
         }
     }
 
+    /// 时间桶 → 分类轴类目标签（日桶 MM-dd，跨年补 yy-；小时桶 MM-dd HH时）
+    private var bucketLabels: [String] {
+        guard let first = result.times.first, let last = result.times.last else { return [] }
+        let cal = Calendar.current
+        let crossesYear = cal.component(.year, from: Date(timeIntervalSince1970: first / 1000))
+            != cal.component(.year, from: Date(timeIntervalSince1970: last / 1000))
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = hourly ? "MM-dd HH时" : (crossesYear ? "yy-MM-dd" : "MM-dd")
+        return result.times.map { f.string(from: Date(timeIntervalSince1970: $0 / 1000)) }
+    }
+
+    /// 轴标签抽稀：最多约 8 个（对应原版 hideOverlap），柱子仍全部绘制
+    private var axisLabelSubset: [String] {
+        let labels = bucketLabels
+        guard labels.count > 9 else { return labels }
+        let step = Int((Double(labels.count) / 8.0).rounded(.up))
+        return labels.enumerated().compactMap { $0.offset % step == 0 ? $0.element : nil }
+    }
+
+    private struct Bar: Identifiable {
+        let id: String        // 桶索引+系列名：body 重算时保持稳定
+        let label: String     // 分类轴类目（时间桶标签）
+        let key: String
+        let value: Double
+    }
+
+    private var bars: [Bar] {
+        let labels = bucketLabels
+        var out: [Bar] = []
+        for (ti, _) in result.times.enumerated() where ti < labels.count {
+            for key in visibleKeys {
+                if let v = result.series[key]?[ti], v != 0 {
+                    out.append(Bar(id: "\(ti)|\(key)", label: labels[ti], key: key, value: v))
+                }
+            }
+        }
+        return out
+    }
+
     /// hover 桶内的明细行（非零系列按值降序；原 tooltipHtml 口径）
     private var hoverRows: [(key: String, value: Double)] {
         guard let i = hoverIndex else { return [] }
@@ -407,7 +449,6 @@ struct SeriesChart: View {
     // MARK: 图例（点击开关系列）
 
     private var legend: some View {
-        // 图例折行：chip 按内容自适应宽度，一行放不下自动换到第二行
         FlowLegend(spacing: 6, lineSpacing: 5) {
             ForEach(allKeys, id: \.self) { key in
                 Button {
@@ -426,7 +467,7 @@ struct SeriesChart: View {
                         Text(key)
                             .font(.system(size: 11))
                             .foregroundStyle(hiddenKeys.contains(key) ? Theme.muted2 : Theme.muted)
-                            .fixedSize(horizontal: true, vertical: false)  // 完整显示，由 FlowLayout 折行
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 2)
@@ -439,71 +480,24 @@ struct SeriesChart: View {
         }
     }
 
-    // MARK: 图表 + hover tooltip
-
-    /// 轴标签抽稀：最多 ~8 个，均匀取（首桶必取），其余柱子仍完整绘制
-    private var axisLabelSubset: [String] {
-        let labels = bucketLabels
-        guard labels.count > 9 else { return labels }
-        let step = Int((Double(labels.count) / 8.0).rounded(.up))
-        return labels.enumerated().compactMap { $0.offset % step == 0 ? $0.element : nil }
-    }
-
-    private struct Bar: Identifiable {
-        let id: String        // 桶索引+系列名：body 重算时保持稳定，避免全量重建动画
-        let label: String     // 分类轴类目（时间桶标签）
-        let key: String
-        let value: Double
-    }
-
-    private var bars: [Bar] {
-        let labels = bucketLabels
-        var out: [Bar] = []
-        for (ti, _) in result.times.enumerated() where ti < labels.count {
-            for key in visibleKeys {
-                if let v = result.series[key]?[ti], v != 0 {
-                    out.append(Bar(id: "\(ti)|\(key)", label: labels[ti], key: key, value: v))
-                }
-            }
-        }
-        return out
-    }
-
-    /// 时间桶 → 分类轴类目标签。
-    /// 与原版 ECharts 一致使用 category 轴（每桶一个类目）：柱与标签同心对齐，
-    /// 而不是连续时间轴（标签落桶边界、柱按天分箱，视觉上会错位）。
-    /// 日桶 MM-dd（跨年补 yy-），小时桶 MM-dd HH时。
-    private var bucketLabels: [String] {
-        guard let first = result.times.first, let last = result.times.last else { return [] }
-        let cal = Calendar.current
-        let crossesYear = cal.component(.year, from: Date(timeIntervalSince1970: first / 1000))
-            != cal.component(.year, from: Date(timeIntervalSince1970: last / 1000))
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_CN")
-        f.dateFormat = hourly ? "MM-dd HH时" : (crossesYear ? "yy-MM-dd" : "MM-dd")
-        return result.times.map { f.string(from: Date(timeIntervalSince1970: $0 / 1000)) }
-    }
+    // MARK: 图表
 
     private var chart: some View {
         let labels = bucketLabels
         let keys = visibleKeys
         return Chart {
             ForEach(bars) { bar in
-                BarMark(
-                    x: .value("时间", bar.label),
-                    y: .value(metric.label, bar.value)
-                )
-                // foregroundStyle(by:) 同时是「按系列堆叠」的信号：
-                // 换成 foregroundStyle(color:) 会让同类目内的柱子被并排分组，
-                // 每根只占日带的一个子槽 → 偏离标签中心（错位根因）
-                .foregroundStyle(by: .value("系列", bar.key))
-                .cornerRadius(2)
+                BarMark(x: .value("时间", bar.label), y: .value(metric.label, bar.value))
+                    // foregroundStyle(by:) 同时是「按系列堆叠」的语义信号：
+                    // 换成 foregroundStyle(color:) 会让同类目内的柱被并排分组而偏离中心
+                    .foregroundStyle(by: .value("系列", bar.key))
+                    .cornerRadius(2)
             }
         }
-        // 系列配色（与自定义图例同序同色）；隐藏 Swift Charts 自带图例
         .chartForegroundStyleScale(domain: keys, range: keys.map(color))
         .chartLegend(.hidden)
-        // 类目域显式声明：空桶也占位、顺序即时间顺序
+        // 类目域显式声明：空桶占位、顺序即时间顺序（不能用 0 高占位柱凑类目，
+        // 那会触发同类目并排分组）
         .chartXScale(domain: labels)
         .chartYAxis {
             AxisMarks(position: .leading, values: .automatic(desiredCount: 5)) { axis in
@@ -516,8 +510,6 @@ struct SeriesChart: View {
             }
         }
         .chartXAxis {
-            // 分类轴：标签即类目名，天然与柱子同心对齐；
-            // 按步长抽稀避免长区间（30 天）标签拥挤（对应原版 hideOverlap）
             AxisMarks(values: axisLabelSubset) { _ in
                 AxisGridLine().foregroundStyle(Theme.border)
                 AxisValueLabel()
@@ -528,28 +520,56 @@ struct SeriesChart: View {
         .chartPlotStyle { plot in
             plot.background(Theme.bgSoft)
         }
+        // hover 层：用 chartOverlay 提供 plot 区坐标系，命中区铺满整个 Chart
+        // （contentShape 保证透明区域也能接收指针事件）
         .chartOverlay { proxy in
             GeometryReader { geo in
+                let plotFrame = geo[proxy.plotAreaFrame]
                 Rectangle()
                     .fill(.clear)
                     .contentShape(Rectangle())
                     .onContinuousHover { phase in
                         switch phase {
                         case .active(let location):
-                            updateHover(location, proxy: proxy)
+                            // proxy.position(forX:) 返回 plot 区内部坐标，而命中层的局部
+                            // 坐标从 Chart 左上角起算（含约 50pt Y 轴）——必须换算，
+                            // 否则命中会整体右移约 1.5 个时间桶
+                            plotOriginX = plotFrame.minX
+                            hoverAt(x: location.x - plotFrame.minX, proxy: proxy)
                         case .ended:
                             hoverIndex = nil
                         }
                     }
                     .overlay(alignment: .topLeading) {
-                        if let i = hoverIndex, !hoverRows.isEmpty {
+                        if hoverIndex != nil, !hoverRows.isEmpty {
                             tooltip
-                                .position(x: min(max(hoverX, tooltipWidth / 2 + 8), geo.size.width - tooltipWidth / 2 - 8),
+                                .position(x: min(max(hoverX + plotOriginX, tooltipWidth / 2 + 8),
+                                                 geo.size.width - tooltipWidth / 2 - 8),
                                           y: tooltipHeight / 2 + 6)
                         }
                     }
             }
         }
+    }
+
+    /// 取最近类目（按各类目的 plot 区屏幕 x），并记录桶中心用于 tooltip 定位
+    private func hoverAt(x: CGFloat, proxy: ChartProxy) {
+        let labels = bucketLabels
+        guard !labels.isEmpty else { return }
+        var bestIdx: Int?
+        var bestDist = CGFloat.greatestFiniteMagnitude
+        var bestX: CGFloat = x
+        for (i, label) in labels.enumerated() {
+            guard let cx = proxy.position(forX: label) else { continue }
+            let d = abs(cx - x)
+            if d < bestDist {
+                bestDist = d
+                bestIdx = i
+                bestX = cx
+            }
+        }
+        hoverIndex = bestIdx
+        hoverX = bestX
     }
 
     private var tooltipWidth: CGFloat { 300 }
@@ -599,27 +619,6 @@ struct SeriesChart: View {
         )
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
         .allowsHitTesting(false)
-    }
-
-    /// hover 位置 → 最近时间桶（原 ECharts trigger: 'axis' 语义）。
-    /// 分类轴下直接比较各类目的屏幕 x（与柱子同心），tooltip 定位同源。
-    private func updateHover(_ location: CGPoint, proxy: ChartProxy) {
-        let labels = bucketLabels
-        guard !labels.isEmpty else { return }
-        var bestIdx = 0
-        var bestDist = CGFloat.greatestFiniteMagnitude
-        var bestX: CGFloat = location.x
-        for (i, label) in labels.enumerated() {
-            guard let x = proxy.position(forX: label) else { continue }
-            let d = abs(x - location.x)
-            if d < bestDist {
-                bestDist = d
-                bestIdx = i
-                bestX = x
-            }
-        }
-        hoverIndex = bestIdx
-        hoverX = bestX
     }
 }
 
