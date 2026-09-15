@@ -388,13 +388,6 @@ struct SeriesChart: View {
         }
     }
 
-    private var bucketFormatter: DateFormatter {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_CN")
-        f.dateFormat = hourly ? "MM-dd HH:00" : "MM-dd"
-        return f
-    }
-
     /// hover 桶内的明细行（非零系列按值降序；原 tooltipHtml 口径）
     private var hoverRows: [(key: String, value: Double)] {
         guard let i = hoverIndex else { return [] }
@@ -448,35 +441,65 @@ struct SeriesChart: View {
 
     // MARK: 图表 + hover tooltip
 
+    /// 轴标签抽稀：最多 ~8 个，均匀取（首桶必取），其余柱子仍完整绘制
+    private var axisLabelSubset: [String] {
+        let labels = bucketLabels
+        guard labels.count > 9 else { return labels }
+        let step = Int((Double(labels.count) / 8.0).rounded(.up))
+        return labels.enumerated().compactMap { $0.offset % step == 0 ? $0.element : nil }
+    }
+
     private struct Bar: Identifiable {
         let id: String        // 桶索引+系列名：body 重算时保持稳定，避免全量重建动画
-        let date: Date
+        let label: String     // 分类轴类目（时间桶标签）
         let key: String
         let value: Double
     }
 
     private var bars: [Bar] {
+        let labels = bucketLabels
         var out: [Bar] = []
-        for (ti, t) in result.times.enumerated() {
-            let date = Date(timeIntervalSince1970: t / 1000)
+        for (ti, _) in result.times.enumerated() where ti < labels.count {
             for key in visibleKeys {
                 if let v = result.series[key]?[ti], v != 0 {
-                    out.append(Bar(id: "\(ti)|\(key)", date: date, key: key, value: v))
+                    out.append(Bar(id: "\(ti)|\(key)", label: labels[ti], key: key, value: v))
                 }
             }
         }
         return out
     }
 
+    /// 时间桶 → 分类轴类目标签。
+    /// 与原版 ECharts 一致使用 category 轴（每桶一个类目）：柱与标签同心对齐，
+    /// 而不是连续时间轴（标签落桶边界、柱按天分箱，视觉上会错位）。
+    /// 日桶 MM-dd（跨年补 yy-），小时桶 MM-dd HH时。
+    private var bucketLabels: [String] {
+        guard let first = result.times.first, let last = result.times.last else { return [] }
+        let cal = Calendar.current
+        let crossesYear = cal.component(.year, from: Date(timeIntervalSince1970: first / 1000))
+            != cal.component(.year, from: Date(timeIntervalSince1970: last / 1000))
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = hourly ? "MM-dd HH时" : (crossesYear ? "yy-MM-dd" : "MM-dd")
+        return result.times.map { f.string(from: Date(timeIntervalSince1970: $0 / 1000)) }
+    }
+
     private var chart: some View {
-        Chart {
+        let labels = bucketLabels
+        return Chart {
+            // 占位柱（0 高、透明）：让每个时间桶都成为类目——
+            // 空桶也占位、类目顺序即时间顺序（原 ECharts category 轴语义）
+            ForEach(labels.indices, id: \.self) { i in
+                BarMark(x: .value("时间", labels[i]), y: .value(metric.label, 0))
+                    .foregroundStyle(.clear)
+            }
             ForEach(bars) { bar in
                 BarMark(
-                    x: .value("时间", bar.date, unit: hourly ? .hour : .day),
+                    x: .value("时间", bar.label),
                     y: .value(metric.label, bar.value)
                 )
                 .foregroundStyle(color(bar.key))
-                .cornerRadius(1.5)
+                .cornerRadius(2)
             }
         }
         .chartYAxis {
@@ -490,9 +513,11 @@ struct SeriesChart: View {
             }
         }
         .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 8)) { _ in
+            // 分类轴：标签即类目名，天然与柱子同心对齐；
+            // 按步长抽稀避免长区间（30 天）标签拥挤（对应原版 hideOverlap）
+            AxisMarks(values: axisLabelSubset) { _ in
                 AxisGridLine().foregroundStyle(Theme.border)
-                AxisValueLabel(format: hourly ? .dateTime.month().day().hour() : .dateTime.month().day())
+                AxisValueLabel()
                     .font(.system(size: 10.5))
                     .foregroundStyle(Theme.muted)
             }
@@ -508,7 +533,7 @@ struct SeriesChart: View {
                     .onContinuousHover { phase in
                         switch phase {
                         case .active(let location):
-                            updateHover(location, proxy: proxy, plotWidth: geo.size.width)
+                            updateHover(location, proxy: proxy)
                         case .ended:
                             hoverIndex = nil
                         }
@@ -532,8 +557,8 @@ struct SeriesChart: View {
     /// hover 明细卡：桶名 + 逐系列行（色点 名称 值）+ 合计（多系列时）
     private var tooltip: some View {
         VStack(alignment: .leading, spacing: 3) {
-            if let i = hoverIndex, i < result.times.count {
-                Text(bucketFormatter.string(from: Date(timeIntervalSince1970: result.times[i] / 1000)))
+            if let i = hoverIndex, i < bucketLabels.count {
+                Text(bucketLabels[i])
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.text)
             }
@@ -573,33 +598,25 @@ struct SeriesChart: View {
         .allowsHitTesting(false)
     }
 
-    /// hover 位置 → 最近时间桶（原 ECharts trigger: 'axis' 语义）
-    private func updateHover(_ location: CGPoint, proxy: ChartProxy, plotWidth: CGFloat) {
-        guard !result.times.isEmpty else { return }
-        guard let date = proxy.value(atX: location.x, as: Date.self) else {
-            hoverIndex = nil
-            return
+    /// hover 位置 → 最近时间桶（原 ECharts trigger: 'axis' 语义）。
+    /// 分类轴下直接比较各类目的屏幕 x（与柱子同心），tooltip 定位同源。
+    private func updateHover(_ location: CGPoint, proxy: ChartProxy) {
+        let labels = bucketLabels
+        guard !labels.isEmpty else { return }
+        var bestIdx = 0
+        var bestDist = CGFloat.greatestFiniteMagnitude
+        var bestX: CGFloat = location.x
+        for (i, label) in labels.enumerated() {
+            guard let x = proxy.position(forX: label) else { continue }
+            let d = abs(x - location.x)
+            if d < bestDist {
+                bestDist = d
+                bestIdx = i
+                bestX = x
+            }
         }
-        let ms = date.timeIntervalSince1970 * 1000
-        // 最近桶：times 有序，二分找最近
-        var lo = 0, hi = result.times.count - 1
-        while lo < hi {
-            let mid = (lo + hi) / 2
-            if result.times[mid] < ms { lo = mid + 1 } else { hi = mid }
-        }
-        // lo 是第一个 >= ms 的桶；与前一个比较取更近者
-        var best = lo
-        if lo > 0, abs(result.times[lo - 1] - ms) <= abs(result.times[lo] - ms) {
-            best = lo - 1
-        }
-        hoverIndex = best
-        // 桶中心的屏幕 x（tooltip 定位）
-        let bucketDate = Date(timeIntervalSince1970: result.times[best] / 1000)
-        if let x = proxy.position(forX: bucketDate) {
-            hoverX = x
-        } else {
-            hoverX = location.x
-        }
+        hoverIndex = bestIdx
+        hoverX = bestX
     }
 }
 
