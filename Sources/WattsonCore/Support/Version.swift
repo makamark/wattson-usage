@@ -5,5 +5,3 @@
 import Foundation
 
 public let WATTSON_VERSION = "2.0.24"
-/// 产品线标识：native = Swift 原生版
-public let WATTSON_CHANNEL = "native"

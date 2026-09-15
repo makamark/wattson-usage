@@ -375,7 +375,7 @@ private struct AboutPage: View {
                         Text("Wattson").font(.system(size: 16, weight: .semibold))
                         Text("多机 AI 编码用量侦探 · Swift 原生版")
                             .font(.system(size: 12)).foregroundStyle(.secondary)
-                        Text("v\(WATTSON_VERSION)（\(WATTSON_CHANNEL)）")
+                        Text("v\(WATTSON_VERSION)")
                             .font(.system(size: 11)).foregroundStyle(.tertiary)
                     }
                 }

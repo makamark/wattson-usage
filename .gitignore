@@ -7,7 +7,8 @@ release/
 agg.config.json
 .superpowers/
 
-# 开发期验收截图（未在 README 引用，不入库；README 引用的 popup/dashboard 两张除外）
+# 开发期验收截图（不入库；README 引用的 docs/shot-popup.png 与 docs/shot-dashboard.png 除外）
+docs/acceptance-*.png
 docs/acceptance-app-dashboard.png
 docs/acceptance-filter-bar.png
 docs/acceptance-plan-section.png

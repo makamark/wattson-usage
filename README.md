@@ -17,7 +17,7 @@
 
 | 菜单栏小窗 | 完整看板 |
 |:---:|:---:|
-| ![popup](docs/acceptance-app-popup.png) | ![dashboard](docs/acceptance-dashboard.png) |
+| ![popup](docs/shot-popup.png) | ![dashboard](docs/shot-dashboard.png) |
 
 </div>
 
@@ -25,13 +25,14 @@
 
 ## ✨ 特性
 
-- 🪟 **原生菜单栏 + 看板窗口** —— SwiftUI 原生 App：托盘常显近 24h Token，看板窗口内含 KPI、订阅额度卡片、每日趋势图与模型明细；无 Electron、无 Node、无浏览器
+- 🪟 **原生菜单栏 + 看板窗口** —— SwiftUI 原生 App：托盘常显近 24h Token，看板单页内含 KPI、趋势图、订阅额度卡片、设备份额、矩阵与模型明细；无 Electron、无 Node、无浏览器
 - 🕵️ **原生解析管线** —— 直接发现并解析本机 AI 工具的会话数据（Claude Code / Codex 的 JSONL、ZCode / WorkBuddy 的 SQLite），多台远端机器经 SSH 镜像汇总；按 天/小时 × 设备/工具/模型/项目 任意切片
 - 🧾 **订阅额度卡片** —— GLM / Codex / Claude / Cursor / WorkBuddy / Trae / Kimi / Gemini / Grok / Zed / Kiro / Codebuff / Factory / Copilot / OpenRouter / MiniMax 共 16 个账号的额度窗口、已用百分比与重置倒计时，直连各家官方接口只读拉取
 - 🛰️ **远端零安装** —— 远端机器只需要系统自带的 `ssh` + `rsync` + `sqlite3`，不留常驻进程；zcode 库在远端投影成 ~2MB 精简快照，增量轮传输 KiB 级（[实测](docs/mirror-volume.md)）
-- 🔒 **数据不出本机** —— API 服务只绑 `127.0.0.1`，无遥测、无云端；订阅凭据只在内存解密，不落看板
-- 💰 **可解释的成本** —— 内嵌价目快照折算，支持 `~/.config/wattson/model-aliases.json` 别名映射；reasoning-in-output 工具（claude/codex/copilot）按 billable 口径去重计价
-- ✅ **测试齐全** —— XCTest 覆盖聚合口径、16 个 provider 的凭据解析与响应归一化、轮询隔离与 TTL、API 路由、采集器并发语义、解析管线与 HTTP 加固，`swift test` 一键回归
+- 🔒 **数据不出本机** —— API 服务**用 socket 层强制只绑 `127.0.0.1`**（非仅靠请求头校验），无遥测、无云端；订阅凭据只在内存解密，不落看板
+- 💰 **可解释的成本** —— 内嵌价目快照折算，支持 `~/.config/wattson/model-aliases.json` 别名映射；reasoning-in-output 工具（claude/codex/copilot）按 billable 口径去重计价；估算部分单独标注
+- ⚡ **增量扫描** —— 未变更的会话文件按指纹复用，重解析成本随新增数据增长而非历史总量（本机约 4 万行实测：无变化时整轮 0.05s）
+- ✅ **测试齐全** —— XCTest 覆盖聚合口径、16 个 provider 的凭据解析与响应归一化、轮询隔离与 TTL、API 路由、采集器并发语义、解析管线（含跨日归因与 fork 去重）、增量复用、socket 绑定加固，`swift test` 一键回归
 
 ## 🧩 支持平台全景
 
@@ -41,10 +42,12 @@
 
 | 工具 | 数据源 | 解析方式 |
 |---|---|---|
-| Claude Code | `~/.claude/projects/**/*.jsonl` | 原生 JSONL 逐行解析（message.usage） |
-| Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | 原生 JSONL（token_count 累计值取文件终值，防 resume/fork 重复计费） |
+| Claude Code | `~/.claude/projects/**/*.jsonl` | 原生 JSONL 逐行解析（`message.usage`）；含 `subagents/**` 递归，按 `message.id` 去重流式重述 |
+| Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | 原生 JSONL 逐事件归因（`token_count` 按事件自身时间戳记账）；以累计值+明细合成去重键抵消 fork/resume 复述 |
 | ZCode | `~/.zcode/cli/db/db.sqlite` | 系统 `sqlite3 -json` 只读查询（session/model_usage 投影） |
-| WorkBuddy | `~/.workbuddy/workbuddy.db` | 系统 `sqlite3 -json`（session_usage 会话级估算） |
+| WorkBuddy | `~/.workbuddy/workbuddy.db` | 系统 `sqlite3 -json`（session_usage 会话级估算，带 model 与项目） |
+
+> 未变更的文件按 `dev/ino/mtime/size` 指纹复用上一轮解析结果，因此重解析成本与「新产生多少数据」成正比，而不是与历史库总量成正比（实测无变化时整轮 9.5s → 0.05s）。
 
 ### 🛰️ 远端多机镜像
 
@@ -198,7 +201,7 @@ open http://127.0.0.1:8317             # API 即 ready；首次冷启动约 1–
 | `GET /api/plan` | 订阅额度（见上表 16 账号；TTL 5 分钟，凭据不出服务端） |
 | `POST /api/refresh` | 触发后台全量重解析，立即返回 202 |
 
-安全加固：`/api/*` 校验 Host 必须精确等于 `127.0.0.1:<port>`（防 DNS rebinding）；`POST /api/refresh` 拒绝跨源 Origin（防表单 CSRF）。
+安全加固：API 服务在 **socket 层只绑 `127.0.0.1`**（`NWParameters.requiredLocalEndpoint`），局域网不可达；`/api/*` 另校验 Host 必须精确等于 `127.0.0.1:<port>`（防 DNS rebinding）；`POST /api/refresh` 拒绝跨源 Origin（防表单 CSRF）。绑定地址有回归测试断言——请求头校验不构成访问控制，只有绑定本身是。
 
 **LaunchAgent 启停**：`launchctl load/unload ~/Library/LaunchAgents/com.wattson.{server,mirror}.plist`，日志在 `~/wattson/{server,mirror}.log`；手动前台调试 `swift run wattson-server`。
 </details>
@@ -211,7 +214,7 @@ open http://127.0.0.1:8317             # API 即 ready；首次冷启动约 1–
 3. workbuddy 用量是会话级估算，粒度粗于 zcode/codex
 4. 成本按内嵌价目快照折算，与实际套餐扣减无关；真实余量看额度卡片；未收录模型成本记 $0，可用 model-aliases 映射
 5. 远端数据最长 30 分钟延迟；远端离线时该轮 skipped，看板继续显示旧快照并标注数据时间
-6. codex 按文件内增量口径取终值记账（防 resume/fork 重复计费），与 codex 自报账面累计口径不同
+6. codex 按**逐事件增量**归因（每个 `token_count` 记在自身时间戳上，并按累计态+明细去重 fork/resume 复述），与 codex 自报账面累计口径不同；跨天长会话因此能正确分摊到每天
 7. 只解析已完成调用的用量行，进行中的轮次下一轮刷新才出现
 8. 原生解析管线当前覆盖 claude/codex/zcode/workbuddy 四类数据源；解析器架构（`SessionSource` 扩展点）可持续增补更多工具
 </details>
@@ -219,7 +222,7 @@ open http://127.0.0.1:8317             # API 即 ready；首次冷启动约 1–
 ## 🧪 测试
 
 ```bash
-swift test    # 121 个用例：聚合口径 / 16 个 provider / 轮询 / API 路由 / 采集器 / 解析管线 / HTTP 加固
+swift test    # 122 个用例：聚合口径 / 16 个 provider / 轮询 / API 路由 / 采集器 / 解析管线 / 增量复用 / HTTP 加固
 ```
 
 所有网络走注入的 fake fetch，测试不出网。

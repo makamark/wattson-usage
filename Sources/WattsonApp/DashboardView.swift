@@ -148,7 +148,7 @@ struct DashboardView: View {
             if let note = state.proxyNote {
                 Text(note).font(.system(size: 11)).foregroundColor(Theme.muted2)
             }
-            Text("v\(WATTSON_VERSION)-native").font(.system(size: 11)).foregroundColor(Theme.muted2)
+            Text("v\(WATTSON_VERSION)").font(.system(size: 11)).foregroundColor(Theme.muted2)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 8)
