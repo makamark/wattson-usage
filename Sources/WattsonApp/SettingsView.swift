@@ -372,7 +372,7 @@ private struct AboutPage: View {
                 HStack(spacing: 14) {
                     BrandMark(size: 56)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Wattson Native").font(.system(size: 16, weight: .semibold))
+                        Text("Wattson").font(.system(size: 16, weight: .semibold))
                         Text("多机 AI 编码用量侦探 · Swift 原生版")
                             .font(.system(size: 12)).foregroundStyle(.secondary)
                         Text("v\(WATTSON_VERSION)（\(WATTSON_CHANNEL)）")

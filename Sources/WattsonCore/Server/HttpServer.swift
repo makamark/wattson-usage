@@ -36,7 +36,14 @@ public final class AggServer: @unchecked Sendable {
         guard let endpoint = NWEndpoint.Port(rawValue: UInt16(port)) else {
             throw HTTPStatusError(status: 0, message: "端口非法：\(port)")
         }
-        let listener = try NWListener(using: params, on: endpoint)
+        // 绑定地址必须是回环，而不是仅靠第 88 行的 Host 头校验兜底：Host 是客户端
+        // 可以任意伪造的请求头，只能挡 DNS rebinding，挡不住直连。不设
+        // requiredLocalEndpoint 时 NWListener 监听 0.0.0.0/::，同局域网任意主机
+        // 带上伪造的 Host 头即可读到全部用量、模型名、项目绝对路径与额度账号清单。
+        // 只有 socket 绑定本身是访问控制。
+        params.requiredLocalEndpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: endpoint)
+        // 端口已含在 requiredLocalEndpoint 里，不能再传 on:（重复指定端口会 EINVAL）
+        let listener = try NWListener(using: params)
         self.listener = listener
         listener.newConnectionHandler = { [weak self] conn in
             self?.accept(conn)

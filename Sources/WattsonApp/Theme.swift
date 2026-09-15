@@ -238,7 +238,7 @@ struct BrandLogo: View {
     static func image(for kind: String) -> NSImage? {
         guard let name = QuotaShort.logo[kind] else { return nil }
         if let cached = cache[name] { return cached }
-        guard let url = Bundle.module.url(forResource: name, withExtension: "svg", subdirectory: "Resources/logos"),
+        guard let url = AppResources.url(forResource: name, withExtension: "svg", subdirectory: "Resources/logos"),
               let img = NSImage(contentsOf: url) else { return nil }
         cache[name] = img
         return img

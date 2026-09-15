@@ -191,35 +191,47 @@ private func installRemoteSnapshot(_ data: Data) -> Bool {
 
 /// 价目查询：精确 → 别名 → 去日期后缀 → 最长前缀（按 - 边界）
 public func getModelCosts(_ model: String) -> ModelCosts? {
-    func entryToCosts(_ e: SnapshotEntry) -> ModelCosts {
-        ModelCosts(input: e.input, output: e.output, cacheWrite: e.cacheWrite,
-                   cacheRead: e.cacheRead, fast: e.fast)
-    }
+    resolvePricing(model).map(entryCosts)
+}
+
+func entryCosts(_ e: SnapshotEntry) -> ModelCosts {
+    ModelCosts(input: e.input, output: e.output, cacheWrite: e.cacheWrite,
+               cacheRead: e.cacheRead, fast: e.fast)
+}
+
+/// 该模型是否公布了明确的缓存写入单价。
+/// false = 缓存写价由 1.25×输入兜底推导，不代表供应商真的收这笔钱——codex 因此
+/// 只在 true 时才把 token 从普通输入划到缓存写桶（否则会凭空造出附加费）。
+public func cacheWriteCostIsExplicit(_ model: String) -> Bool {
+    resolvePricing(model)?.cacheWrite != nil
+}
+
+private func resolvePricing(_ model: String) -> SnapshotEntry? {
     func lookup(_ m: String) -> SnapshotEntry? {
         if let e = PRICING_SNAPSHOT[m] { return e }
         let lower = m.lowercased()
         if let e = PRICING_SNAPSHOT[lower] { return e }
         return nil
     }
-    if let e = lookup(model) { return entryToCosts(e) }
+    if let e = lookup(model) { return e }
     // LiteLLM 远程快照（精确匹配；lowercased 键）
     remoteLock.lock()
     let remoteHit = remoteSnapshot[model.lowercased()]
     remoteLock.unlock()
-    if let e = remoteHit { return entryToCosts(e) }
+    if let e = remoteHit { return e }
     // 别名（静态文件每次读取成本可接受：调用频率 = 每次 refresh 每行一次；
     // 行级重估时同一快照已带 costUSD 不会再进来）
     let aliases = loadModelAliases()
-    if let target = aliases[model], let e = lookup(target) { return entryToCosts(e) }
+    if let target = aliases[model], let e = lookup(target) { return e }
     // 去日期后缀（gpt-5.2-20260101 → gpt-5.2）：先内嵌再远程
     var base = model.lowercased()
     if let r = base.range(of: #"-[0-9]{6,8}$"#, options: .regularExpression) {
         base = String(base[..<r.lowerBound])
-        if let e = lookup(base) { return entryToCosts(e) }
+        if let e = lookup(base) { return e }
         remoteLock.lock()
         let remoteBase = remoteSnapshot[base]
         remoteLock.unlock()
-        if let e = remoteBase { return entryToCosts(e) }
+        if let e = remoteBase { return e }
     }
     // 最长前缀（按 - 边界）：glm-5.2-thinking → glm-5.2
     var candidates: [String] = []
@@ -231,14 +243,14 @@ public func getModelCosts(_ model: String) -> ModelCosts? {
         if idx >= base.endIndex { break }
     }
     for c in candidates.reversed() {
-        if let e = PRICING_SNAPSHOT[c] { return entryToCosts(e) }
+        if let e = PRICING_SNAPSHOT[c] { return e }
     }
     remoteLock.lock()
     let remoteCandidates = candidates.compactMap { remoteSnapshot[$0] }
     remoteLock.unlock()
-    if let e = remoteCandidates.first { return entryToCosts(e) }
-    return nil
+    return remoteCandidates.first
 }
+
 
 func tieredCostsFor(_ model: String, _ costs: ModelCosts, _ promptTokens: Double) -> ModelCosts {
     if model.lowercased().hasPrefix("grok-4.6"), promptTokens >= GROK_4_6_PROMPT_TOKEN_THRESHOLD {

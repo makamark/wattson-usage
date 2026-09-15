@@ -189,6 +189,16 @@ final class AppState: ObservableObject {
         scheduleRefresh()
     }
 
+    /// 若距上次成功采集已超过一个刷新周期（或从未成功）则重采。
+    /// 打开看板窗口走这里而不是无条件 refreshNow：数据没变化时重采只是白烧
+    /// 一轮全量解析（本机实测约 10 秒 CPU），而看板会被反复开关。
+    func refreshIfStale() async {
+        let last = snapshot.lastSuccessAt ?? 0
+        let age = Date.nowMs() - last
+        guard last == 0 || age >= refreshMinutes * 60 * 1000 else { return }
+        await refreshNow()
+    }
+
     func refreshNow() async {
         refreshing = true
         _ = await collector.refresh()
@@ -239,7 +249,7 @@ final class AppState: ObservableObject {
     /// 立即同步远端：跑打包内置的 mirror.sh（AGG_CONFIG 指向当前配置），日志追加到 mirror.log
     func runMirrorNow() {
         guard !mirrorRunning else { return }
-        guard let script = Bundle.module.path(forResource: "mirror", ofType: "sh", inDirectory: "Resources")
+        guard let script = AppResources.path(forResource: "mirror", ofType: "sh", inDirectory: "Resources")
         else { return }
         mirrorRunning = true
         let configPath = self.configPath

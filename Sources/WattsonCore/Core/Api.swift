@@ -39,22 +39,29 @@ public typealias ApiResult = (status: Int, body: JSON)
 
 /// 聚合结果按「快照实例 + 查询串」缓存：rows 在每次 refresh 时整体替换，
 /// 同一快照内页面一次渲染的多个区块可直接复用，避免每请求全量重扫。
+/// 快照实例一旦被替换就再也不会被请求，因此只保留最新一个实例的条目——
+/// 否则每轮刷新都会永久留下一个条目（每个最多 200 份序列化响应体），
+/// launchd 常驻数月即无上界增长。
 public final class ApiBodyCache: @unchecked Sendable {
     public static let shared = ApiBodyCache()
     private let lock = NSLock()
-    private var map: [UUID: [String: JSON]] = [:]
+    private var currentID: UUID?
+    private var map: [String: JSON] = [:]
 
     func get(_ id: UUID, _ key: String) -> JSON? {
         lock.lock(); defer { lock.unlock() }
-        return map[id]?[key]
+        guard currentID == id else { return nil }
+        return map[key]
     }
 
     func put(_ id: UUID, _ key: String, _ body: JSON) {
         lock.lock(); defer { lock.unlock() }
-        var m = map[id] ?? [:]
-        if m.count >= 200 { m.removeAll() }
-        m[key] = body
-        map[id] = m
+        if currentID != id {
+            currentID = id
+            map.removeAll()
+        }
+        if map.count >= 200 { map.removeAll() }
+        map[key] = body
     }
 }
 

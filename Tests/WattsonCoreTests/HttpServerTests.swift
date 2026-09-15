@@ -109,6 +109,46 @@ final class HttpServerTests: XCTestCase {
         return r
     }
 
+    /// P0 回归：API 必须只绑回环。Host 头校验是客户端可任意伪造的请求头，不是访问
+    /// 控制；这里直接断言 socket 的绑定地址（用 lsof 看 LISTEN 的本地端），而不是
+    /// 从局域网地址回连——后者受路由/VPN 影响，结论不稳。
+    func testLiveServerBindsLoopbackOnly() async throws {
+        let port = try await freePort()
+        let server = makeServer(port: port)
+        try server.start()
+        defer { server.stop() }
+        var bound: String?
+        for _ in 0..<50 {
+            if let name = listenAddress(port: port) { bound = name; break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        let name = try XCTUnwrap(bound, "5s 内未观察到 \(port) 的 LISTEN socket")
+        // lsof 的本地端形如 127.0.0.1:8317 / *:8317 / [::1]:8317
+        XCTAssertTrue(name.hasPrefix("127.0.0.1:") || name.hasPrefix("[::1]:"),
+                      "监听地址是 \(name)：并非只绑回环，同局域网主机可直读用量、模型名与项目绝对路径")
+    }
+
+    /// 目标端口的 LISTEN 本地地址（lsof -nP -iTCP:<port> -sTCP:LISTEN）；未就绪返回 nil
+    private func listenAddress(port: Int) -> String? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        p.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN"]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = Pipe()
+        guard (try? p.run()) != nil else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        let out = String(data: data, encoding: .utf8) ?? ""
+        for line in out.split(separator: "\n").dropFirst() {
+            let cols = line.split(separator: " ", omittingEmptySubsequences: true)
+            // 最后一列是 "(LISTEN)"，其前一列是本地端
+            guard cols.count >= 2, cols.last == "(LISTEN)" else { continue }
+            return String(cols[cols.count - 2])
+        }
+        return nil
+    }
+
     private func freePort() async throws -> Int {
         // BSD socket：bind 到 0 号端口拿内核分配的空闲端口
         let sock = Darwin.socket(AF_INET, SOCK_STREAM, 0)

@@ -25,7 +25,7 @@ struct DashboardView: View {
         .frame(minWidth: 980, minHeight: 640)
         .background(dashboardBackground)
         .preferredColorScheme(nil)
-        .task { await state.refreshNow() }
+        .task { await state.refreshIfStale() }
     }
 
     /// 炭黑/浅色自适应底 + 双辉光（同 web style.css 的 radial-gradient）
@@ -219,6 +219,13 @@ private struct KpiSection: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .wattsonCard(padding: 12)
             }
+        }
+        // 估算口径必须可见：成本里有「解析时未定价、事后按价目表重估」的部分，
+        // 它与已存成本混在同一个数字里，但可信度不同（之前只算不展示）
+        if data.main.estimatedCost > 0 {
+            Text("成本含估算部分 \(Fmt.cost(data.main.estimatedCost))（未存储成本的行按内嵌价目表重估）")
+                .font(.system(size: 10.5))
+                .foregroundColor(Theme.muted2)
         }
     }
 
@@ -631,9 +638,16 @@ private struct PlanSection: View {
         let accounts = state.quota.accounts
         let cards = accounts.filter { $0.available || ($0.unavailableReason != "no_credentials" && $0.unavailableReason != "loading") }
         if !cards.isEmpty {
+            // 统一卡片高度：按最大窗口数定行槽位，不足的卡片补隐形行
+            // （有的 provider 只给周额度，1 行卡会明显矮于 5小时+周 的 2 行卡）
+            let rowSlots = max(1, cards.map(\.windows.count).max() ?? 1)
             Text("订阅额度").font(.system(size: 14, weight: .semibold))
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12)], spacing: 12) {
-                ForEach(cards, id: \.self) { PlanCard(account: $0) }
+            // 固定 2 个弹性列（一行 2 个）。不要用 adaptive：卡片固有最小宽约 382pt
+            // （标签 56 + 进度条 132 + 数字 150 + 行内间距 16 + 内边距 28），窗口 ≥980 时
+            // adaptive(minimum: 300) 会排出 3 列（列宽仅约 305），卡片内容溢出轨道被邻卡压住。
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+                      spacing: 12) {
+                ForEach(cards, id: \.self) { PlanCard(account: $0, rowSlots: rowSlots) }
             }
         }
     }
@@ -641,46 +655,71 @@ private struct PlanSection: View {
 
 struct PlanCard: View {
     let account: QuotaAccount
+    /// 行槽位数（订阅额度区内所有卡片的最大窗口数）：窗口不足的卡片补隐形行，
+    /// 保证整片订阅框等高；「未读到」「套餐生效中」也各占一个槽位
+    var rowSlots: Int = 1
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !account.available {
-                Text(account.label).font(.system(size: 12, weight: .semibold))
-                Text("未能读取（\(account.unavailableReason ?? "unknown")\(account.error.map { "：\($0)" } ?? "")）")
-                    .font(.system(size: 11.5))
-                    .foregroundColor(Theme.muted)
+            header
+            if account.available && !account.windows.isEmpty {
+                ForEach(account.windows, id: \.key) { windowRow($0) }
+                fillerSlots(rowSlots - account.windows.count)
             } else {
-                HStack(spacing: 8) {
-                    BrandLogo(kind: account.kind.rawValue, size: 28)
-                    Text(QuotaShort.kind[account.kind.rawValue] ?? account.label)
-                        .font(.system(size: 13, weight: .semibold))
-                    if let plan = account.planName,
-                       plan != (QuotaShort.kind[account.kind.rawValue] ?? account.label) {
-                        Text(plan).font(.system(size: 10.5, weight: .medium))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 7)
-                            .background(Capsule().fill(Theme.accent))
-                            .lineLimit(1)
-                    }
-                    if let rc = account.resetCredits, rc > 0 {
-                        Text("重置卡 ×\(Int(rc))").font(.system(size: 10.5, weight: .medium))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 7)
-                            .background(Capsule().fill(Theme.warn))
-                    }
-                    Spacer()
-                }
-                if account.windows.isEmpty {
-                    Text("套餐生效中，暂无额度窗口数据").font(.system(size: 11.5)).foregroundColor(Theme.muted)
-                } else {
-                    ForEach(account.windows, id: \.key) { w in
-                        windowRow(w)
-                    }
-                }
+                slotText(account.available
+                         ? "套餐生效中，暂无额度窗口数据"
+                         : "未能读取（\(account.unavailableReason ?? "unknown")\(account.error.map { "：\($0)" } ?? "")）")
+                fillerSlots(rowSlots - 1)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .wattsonCard()
+    }
+
+    /// 卡片头部：两类卡片（正常 / 未读到）结构一致，高度才对得齐
+    private var header: some View {
+        HStack(spacing: 8) {
+            BrandLogo(kind: account.kind.rawValue, size: 28)
+            Text(QuotaShort.kind[account.kind.rawValue] ?? account.label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(account.available ? Theme.text : Theme.muted)
+            if account.available,
+               let plan = account.planName,
+               plan != (QuotaShort.kind[account.kind.rawValue] ?? account.label) {
+                Text(plan).font(.system(size: 10.5, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 7)
+                    .background(Capsule().fill(Theme.accent))
+                    .lineLimit(1)
+            }
+            if account.available, let rc = account.resetCredits, rc > 0 {
+                Text("重置卡 ×\(Int(rc))").font(.system(size: 10.5, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 7)
+                    .background(Capsule().fill(Theme.warn))
+            }
+            Spacer()
+        }
+    }
+
+    /// 补齐高度用的隐形行：复用 windowRow 结构，占位高度与真实行完全一致
+    @ViewBuilder private func fillerSlots(_ count: Int) -> some View {
+        if count > 0 {
+            ForEach(0..<count, id: \.self) { i in
+                windowRow(QuotaWindow(key: "slot-\(i)", label: " ")).hidden()
+            }
+        }
+    }
+
+    /// 无窗口数据时的说明文字：套在隐形窗口行里，使该槽位与真实窗口行等高
+    private func slotText(_ text: String) -> some View {
+        ZStack(alignment: .leading) {
+            windowRow(QuotaWindow(key: "slot-text", label: " ")).hidden()
+            Text(text)
+                .font(.system(size: 11.5))
+                .foregroundColor(Theme.muted)
+                .lineLimit(2)
+        }
     }
 
     /// 窗口行：三列严格对齐（标签 60 / 进度条弹性 / 数字 168 右对齐），

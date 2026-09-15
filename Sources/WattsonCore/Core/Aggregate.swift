@@ -293,14 +293,16 @@ public struct MatrixResult: Sendable, Equatable {
 }
 
 public func matrix(_ rows: [UsageRow], _ rowKey: Group, colKey: String = "model") -> MatrixResult {
-    func col(_ r: UsageRow) -> String { colKey == "model" ? r.model : r.model }
+    // 列维度目前只支持 model；显式声明而不是让它静默落回 model，
+    // 否则将来传入别的列名会以该名义输出 model 数据
+    precondition(colKey == "model", "matrix 仅支持 colKey=model，收到 \(colKey)")
     let rowKeys = Array(Set(rows.map { groupValue($0, rowKey) })).sorted()
-    let colKeys = Array(Set(rows.map { col($0) })).sorted()
+    let colKeys = Array(Set(rows.map { $0.model })).sorted()
     let ri = Dictionary(uniqueKeysWithValues: rowKeys.enumerated().map { ($1, $0) })
     let ci = Dictionary(uniqueKeysWithValues: colKeys.enumerated().map { ($1, $0) })
     var values: [[Double?]] = rowKeys.map { _ in colKeys.map { _ in nil } }
     for r in rows {
-        let i = ri[groupValue(r, rowKey)]!, j = ci[col(r)]!
+        let i = ri[groupValue(r, rowKey)]!, j = ci[r.model]!
         values[i][j] = (values[i][j] ?? 0) + rowTokens(r)
     }
     return MatrixResult(rowKeys: rowKeys, colKeys: colKeys, values: values)

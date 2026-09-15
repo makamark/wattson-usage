@@ -40,10 +40,15 @@ public struct CachedCall: Sendable, Equatable {
     public var project: String?
     public var isEstimated: Bool?
     public var costIsEstimated: Bool?
+    /// 去重键（claude = message.id 或 `claude:<ts>`）。
+    /// 增量复用未变更文件时，必须用它回种去重集合：resume/fork 会新建一个会话文件
+    /// 复述旧文件里的 assistant 消息，不回种就会把旧支出再记一遍。
+    public var dedupKey: String?
 
     public init(provider: String? = nil, model: String? = nil, usage: CachedUsage? = nil,
                 costUSD: Double? = nil, speed: String? = nil, timestamp: String,
-                project: String? = nil, isEstimated: Bool? = nil, costIsEstimated: Bool? = nil) {
+                project: String? = nil, isEstimated: Bool? = nil, costIsEstimated: Bool? = nil,
+                dedupKey: String? = nil) {
         self.provider = provider
         self.model = model
         self.usage = usage
@@ -53,6 +58,7 @@ public struct CachedCall: Sendable, Equatable {
         self.project = project
         self.isEstimated = isEstimated
         self.costIsEstimated = costIsEstimated
+        self.dedupKey = dedupKey
     }
 }
 

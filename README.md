@@ -83,13 +83,19 @@
 
 ```bash
 git clone https://github.com/makamark/wattson-usage && cd wattson-usage
-bash scripts/package-app.sh            # 产物：release/WattsonNative-2.0.21-arm64.dmg
-open release/WattsonNative-2.0.21-arm64.dmg
+bash scripts/package-app.sh            # 产物：release/Wattson-2.0.24-arm64.dmg
+open release/Wattson-2.0.24-arm64.dmg
 ```
 
-> 命名体系与 Electron 时代的 `Wattson-0.1.x-arm64.dmg`（com.wattson.app）明确区分：
-> 原生版为 **WattsonNative**（Bundle ID `com.wattson.native`），版本从 **2.0.21** 起线。
-> 两者可并存；经即时通讯/AirDrop 分发需先 `xattr -cr /Applications/WattsonNative.app`。
+> 命名沿用原版体系：**Wattson**（Bundle ID `com.wattson.app`），产物 `Wattson-<版本>-arm64.dmg`；
+> 版本号：Electron 时代为 0.1.x，Swift 原生线自 2.0.0 起。
+> 经即时通讯/AirDrop 分发需先 `xattr -cr /Applications/Wattson.app`。
+> 2.0.22 起修复：`.app` 内嵌 SwiftPM 资源束，此前资源定位失败会导致点状态栏图标闪退。
+> 2.0.23 起修复：订阅额度卡片固定一行 2 个，此前列宽小于卡片固有宽度会导致相邻卡片互相覆盖。
+> 2.0.24 起修复：**API 服务此前实际监听所有网卡**（同局域网可直读用量与项目路径），现强制只绑
+> 回环；codex 用量改为按事件时间戳归因并对 fork/resume 复述去重（此前整会话累计值记到最后一天，
+> 跨日趋势失真、fork 会话重复计费）；claude 补上 subagents 递归、流式重复消息去重与 1 小时缓存价；
+> workbuddy 恢复 model/cwd 与已删除会话过滤；未变更文件按指纹复用，无变化时刷新约 10s → 0.05s。
 
 菜单栏出现 ⚡ 图标：左键看各账号额度速览，「打开看板」进完整窗口。首次运行自动扫描本机数据源并开始采集。开发调试可直接 `swift build -c release && open .build/release/WattsonApp`。
 
@@ -213,7 +219,7 @@ open http://127.0.0.1:8317             # API 即 ready；首次冷启动约 1–
 ## 🧪 测试
 
 ```bash
-swift test    # 111 个用例：聚合口径 / 16 个 provider / 轮询 / API 路由 / 采集器 / 解析管线 / HTTP 加固
+swift test    # 121 个用例：聚合口径 / 16 个 provider / 轮询 / API 路由 / 采集器 / 解析管线 / HTTP 加固
 ```
 
 所有网络走注入的 fake fetch，测试不出网。

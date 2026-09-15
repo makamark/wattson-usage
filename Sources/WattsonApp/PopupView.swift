@@ -412,7 +412,7 @@ struct BrandMark: View {
 
     static var image: NSImage? {
         if let cached = _image { return cached }
-        guard let url = Bundle.module.url(forResource: "brand", withExtension: "png", subdirectory: "Resources"),
+        guard let url = AppResources.url(forResource: "brand", withExtension: "png", subdirectory: "Resources"),
               let img = NSImage(contentsOf: url) else { return nil }
         _image = img
         return img
