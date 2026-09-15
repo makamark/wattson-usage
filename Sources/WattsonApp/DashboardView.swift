@@ -339,18 +339,20 @@ private struct MainChartSection: View {
     }
 }
 
-/// 堆叠柱状图（ECharts 主图的 Swift Charts 等价：系列堆叠 + 图例 + 对应口径的 Y 轴格式）
+/// 堆叠柱状图（ECharts 主图的 Swift Charts 等价）：
+/// hover 明细 tooltip（该时间点全部非零系列按用量降序 + 合计）+
+/// 可点击图例开关系列（对齐 ECharts legend.selected 行为）。
 struct SeriesChart: View {
     let result: SeriesResult
     let metric: MetricOption
     let hourly: Bool
 
-    private struct Point: Identifiable {
-        let id = UUID()
-        let date: Date
-        let key: String
-        let value: Double
-    }
+    /// 用户手动隐藏的系列（图例点击开关；原 ECharts legend.selected）
+    @State private var hiddenKeys: Set<String> = []
+    /// 当前 hover 的时间桶索引（nil = 无提示框）
+    @State private var hoverIndex: Int?
+    /// hover 点在图表坐标系中的 x 位置（tooltip 定位用）
+    @State private var hoverX: CGFloat = 0
 
     /// 系列顺序 = 字典序，「其他/其他*」固定排最后（配色稳定）
     private var allKeys: [String] {
@@ -360,17 +362,19 @@ struct SeriesChart: View {
         return normal
     }
 
-    private var points: [Point] {
-        var out: [Point] = []
-        for (ti, t) in result.times.enumerated() {
-            let date = Date(timeIntervalSince1970: t / 1000)
-            for key in allKeys {
-                if let v = result.series[key]?[ti], v != 0 {
-                    out.append(Point(date: date, key: key, value: v))
-                }
-            }
+    private var visibleKeys: [String] { allKeys.filter { !hiddenKeys.contains($0) } }
+
+    private func color(_ key: String) -> Color {
+        guard let idx = allKeys.firstIndex(of: key) else { return Theme.accent }
+        return Theme.palette[idx % Theme.palette.count]
+    }
+
+    private func valueFmt(_ v: Double) -> String {
+        switch metric {
+        case .cost: return Fmt.cost(v)
+        case .calls: return Fmt.int(v)
+        case .tokens: return Fmt.tokens(v)
         }
-        return out
     }
 
     private func axisFmt(_ v: Double) -> String {
@@ -381,21 +385,96 @@ struct SeriesChart: View {
         }
     }
 
+    private var bucketFormatter: DateFormatter {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = hourly ? "MM-dd HH:00" : "MM-dd"
+        return f
+    }
+
+    /// hover 桶内的明细行（非零系列按值降序；原 tooltipHtml 口径）
+    private var hoverRows: [(key: String, value: Double)] {
+        guard let i = hoverIndex else { return [] }
+        return visibleKeys.compactMap { key in
+            guard let v = result.series[key]?[i], v != 0 else { return nil }
+            return (key, v)
+        }.sorted { $0.value > $1.value }
+    }
+
     var body: some View {
-        let keys = allKeys
-        let colors = keys.enumerated().map { i, _ in Theme.palette[i % Theme.palette.count] }
+        VStack(spacing: 6) {
+            if allKeys.count > 1 { legend }
+            chart
+        }
+    }
+
+    // MARK: 图例（点击开关系列）
+
+    private var legend: some View {
+        FlexibleHStack(spacing: 6, lineSpacing: 4) {
+            ForEach(allKeys, id: \.self) { key in
+                Button {
+                    if hiddenKeys.contains(key) {
+                        hiddenKeys.remove(key)
+                    } else if hiddenKeys.count < allKeys.count - 1 {
+                        hiddenKeys.insert(key)  // 至少保留一个系列
+                    } else {
+                        hiddenKeys.removeAll()  // 点最后一个 = 全部恢复
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(hiddenKeys.contains(key) ? Theme.muted2.opacity(0.4) : color(key))
+                            .frame(width: 8, height: 8)
+                        Text(key)
+                            .font(.system(size: 11))
+                            .foregroundStyle(hiddenKeys.contains(key) ? Theme.muted2 : Theme.muted)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(hiddenKeys.contains(key) ? Color.clear : Theme.panel2))
+                    .overlay(Capsule().strokeBorder(Theme.border, lineWidth: hiddenKeys.contains(key) ? 1 : 0))
+                }
+                .buttonStyle(.plain)
+                .help(hiddenKeys.contains(key) ? "显示 \(key)" : "隐藏 \(key)")
+            }
+        }
+    }
+
+    // MARK: 图表 + hover tooltip
+
+    private struct Bar: Identifiable {
+        let id: String        // 桶索引+系列名：body 重算时保持稳定，避免全量重建动画
+        let date: Date
+        let key: String
+        let value: Double
+    }
+
+    private var bars: [Bar] {
+        var out: [Bar] = []
+        for (ti, t) in result.times.enumerated() {
+            let date = Date(timeIntervalSince1970: t / 1000)
+            for key in visibleKeys {
+                if let v = result.series[key]?[ti], v != 0 {
+                    out.append(Bar(id: "\(ti)|\(key)", date: date, key: key, value: v))
+                }
+            }
+        }
+        return out
+    }
+
+    private var chart: some View {
         Chart {
-            ForEach(points) { p in
+            ForEach(bars) { bar in
                 BarMark(
-                    x: .value("时间", p.date, unit: hourly ? .hour : .day),
-                    y: .value(metric.label, p.value)
+                    x: .value("时间", bar.date, unit: hourly ? .hour : .day),
+                    y: .value(metric.label, bar.value)
                 )
-                .foregroundStyle(by: .value("系列", p.key))
+                .foregroundStyle(color(bar.key))
                 .cornerRadius(1.5)
             }
         }
-        .chartForegroundStyleScale(domain: keys, range: colors)
-        .chartLegend(keys.count > 1 ? .visible : .hidden)
         .chartYAxis {
             AxisMarks(position: .leading, values: .automatic(desiredCount: 5)) { axis in
                 AxisGridLine().foregroundStyle(Theme.borderStrong)
@@ -416,6 +495,121 @@ struct SeriesChart: View {
         }
         .chartPlotStyle { plot in
             plot.background(Theme.bgSoft)
+        }
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                Rectangle()
+                    .fill(.clear)
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let location):
+                            updateHover(location, proxy: proxy, plotWidth: geo.size.width)
+                        case .ended:
+                            hoverIndex = nil
+                        }
+                    }
+                    .overlay(alignment: .topLeading) {
+                        if let i = hoverIndex, !hoverRows.isEmpty {
+                            tooltip
+                                .position(x: min(max(hoverX, tooltipWidth / 2 + 8), geo.size.width - tooltipWidth / 2 - 8),
+                                          y: tooltipHeight / 2 + 6)
+                        }
+                    }
+            }
+        }
+    }
+
+    private var tooltipWidth: CGFloat { 240 }
+    private var tooltipHeight: CGFloat {
+        CGFloat(min(hoverRows.count, 9) * 20 + 52)
+    }
+
+    /// hover 明细卡：桶名 + 逐系列行（色点 名称 值）+ 合计（多系列时）
+    private var tooltip: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if let i = hoverIndex, i < result.times.count {
+                Text(bucketFormatter.string(from: Date(timeIntervalSince1970: result.times[i] / 1000)))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.text)
+            }
+            ForEach(hoverRows.prefix(8), id: \.key) { row in
+                HStack(spacing: 6) {
+                    Circle().fill(color(row.key)).frame(width: 7, height: 7)
+                    Text(row.key).lineLimit(1).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 6)
+                    Text(valueFmt(row.value)).monospacedDigit().foregroundStyle(Theme.text)
+                }
+                .font(.system(size: 11))
+            }
+            if hoverRows.count > 8 {
+                Text("还有 \(hoverRows.count - 8) 项…")
+                    .font(.system(size: 10.5)).foregroundStyle(Theme.muted2)
+            }
+            if hoverRows.count > 1 {
+                Divider().overlay(Theme.border)
+                HStack {
+                    Text("合计").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.muted)
+                    Spacer()
+                    Text(valueFmt(hoverRows.reduce(0) { $0 + $1.value }))
+                        .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                        .foregroundStyle(Theme.text)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(width: tooltipWidth, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Theme.panel)
+                .shadow(color: .black.opacity(0.18), radius: 10, y: 3)
+        )
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
+        .allowsHitTesting(false)
+    }
+
+    /// hover 位置 → 最近时间桶（原 ECharts trigger: 'axis' 语义）
+    private func updateHover(_ location: CGPoint, proxy: ChartProxy, plotWidth: CGFloat) {
+        guard !result.times.isEmpty else { return }
+        guard let date = proxy.value(atX: location.x, as: Date.self) else {
+            hoverIndex = nil
+            return
+        }
+        let ms = date.timeIntervalSince1970 * 1000
+        // 最近桶：times 有序，二分找最近
+        var lo = 0, hi = result.times.count - 1
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if result.times[mid] < ms { lo = mid + 1 } else { hi = mid }
+        }
+        // lo 是第一个 >= ms 的桶；与前一个比较取更近者
+        var best = lo
+        if lo > 0, abs(result.times[lo - 1] - ms) <= abs(result.times[lo] - ms) {
+            best = lo - 1
+        }
+        hoverIndex = best
+        // 桶中心的屏幕 x（tooltip 定位）
+        let bucketDate = Date(timeIntervalSince1970: result.times[best] / 1000)
+        if let x = proxy.position(forX: bucketDate) {
+            hoverX = x
+        } else {
+            hoverX = location.x
+        }
+    }
+}
+
+/// 简易换行 HStack（图例条超出宽度自动折行）
+private struct FlexibleHStack<Content: View>: View {
+    var spacing: CGFloat
+    var lineSpacing: CGFloat
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        // LazyVGrid 自适应列近似折行：以最小宽度估算列数
+        let columns = [GridItem(.adaptive(minimum: 92), alignment: .leading)]
+        LazyVGrid(columns: columns, alignment: .leading, spacing: lineSpacing) {
+            content
         }
     }
 }
