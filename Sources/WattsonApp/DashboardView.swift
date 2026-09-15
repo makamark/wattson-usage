@@ -245,16 +245,16 @@ private struct FilterBarSection: View {
         if data.facetHost.isEmpty && data.facetTool.isEmpty {
             EmptyView()
         } else {
-            HStack(spacing: 6) {
+            // 流式折行：chip 一行放不下时整齐换到第二行（原单行 HStack 会挤错行）
+            FlowLegend(spacing: 6, lineSpacing: 6) {
                 if !data.facetHost.isEmpty {
-                    Text("设备").font(.system(size: 11, weight: .semibold)).foregroundColor(Theme.muted)
+                    groupLabel("设备")
                     ForEach(data.facetHost, id: \.0) { name, entry in
                         chip(facet: "hosts", name: name, tokens: entry.tokens, on: f.hosts.contains(name))
                     }
                 }
                 if !data.facetHost.isEmpty && !data.facetTool.isEmpty {
-                    Divider().frame(height: 14).overlay(Theme.border)
-                    Text("工具").font(.system(size: 11, weight: .semibold)).foregroundColor(Theme.muted)
+                    groupLabel("工具")
                 }
                 ForEach(data.facetTool, id: \.0) { name, entry in
                     chip(facet: "tools", name: name, tokens: entry.tokens, on: f.tools.contains(name), logo: true)
@@ -265,11 +265,18 @@ private struct FilterBarSection: View {
                         state.filters.tools = []
                     }
                     .buttonStyle(.link)
-                    .font(.system(size: 11.5))
+                    .font(.system(size: 11.5, weight: .medium))
                 }
-                Spacer(minLength: 0)
             }
         }
+    }
+
+    private func groupLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundColor(Theme.muted)
+            .padding(.trailing, 2)
+            .frame(height: 22)  // 与 chip 行高一致，折行后基线整齐
     }
 
     private func chip(facet: String, name: String, tokens: Double, on: Bool, logo: Bool = false) -> some View {
@@ -674,9 +681,10 @@ struct PlanCard: View {
         return HStack(spacing: 8) {
             Text(QuotaShort.window[w.key] ?? w.label)
                 .font(.system(size: 11.5)).foregroundColor(Theme.muted)
-                .frame(width: 60, alignment: .leading).lineLimit(1)
+                .frame(width: 56, alignment: .leading).lineLimit(1)
+            // 进度条固定宽度：卡片内多行（5小时/周）起止位置严格一致
             quotaBar(fraction: remainPct / 100, color: barColor)
-                .frame(minWidth: 48)
+                .frame(width: 132)
             VStack(alignment: .trailing, spacing: 1) {
                 Text(nums).monospacedDigit()
                     .font(.system(size: 10.5, weight: remainPct <= 30 ? .semibold : .regular))
@@ -690,7 +698,7 @@ struct PlanCard: View {
                 .foregroundStyle(Theme.muted2)
                 .fixedSize(horizontal: true, vertical: false)
             }
-            .frame(alignment: .trailing)
+            .frame(width: 150, alignment: .trailing)  // 数字列定宽：多行右缘对齐
         }
         .padding(.vertical, 3)
     }
@@ -830,43 +838,62 @@ private struct ModelsSection: View {
     }
 }
 
-/// 流式折行图例（Layout 协议）：子项按内容自适应宽度，超行自动折到下一行
+/// 流式折行布局（Layout 协议）：子项按内容自适应宽度，超行自动折到下一行。
+/// 注意：必须按行保序累加 x 坐标；用字典存行会让同排子项顺序错乱并堆叠到同一点。
 private struct FlowLegend: Layout {
     var spacing: CGFloat
     var lineSpacing: CGFloat
 
+    private struct Item {
+        let index: Int
+        let size: CGSize
+    }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        arrange(proposal.width ?? 320, subviews: subviews).size
+        let maxWidth = proposal.width ?? 320
+        let lines = arrange(maxWidth: maxWidth, subviews: subviews)
+        let width = lines.map(\.width).max() ?? 0
+        let height = CGFloat(lines.count) * lineHeight + CGFloat(max(0, lines.count - 1)) * lineSpacing
+        return CGSize(width: min(width, maxWidth), height: height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let lines = arrange(bounds.width, subviews: subviews).lines
+        let lines = arrange(maxWidth: bounds.width, subviews: subviews)
         for (li, line) in lines.enumerated() {
-            for (si, size) in line {
-                subviews[si].place(at: CGPoint(x: 0, y: CGFloat(li) * (lineHeight + lineSpacing)),
-                                   anchor: .topLeading, proposal: ProposedViewSize(size))
+            var x = bounds.minX
+            let y = bounds.minY + CGFloat(li) * (lineHeight + lineSpacing)
+            for item in line.items {
+                subviews[item.index].place(at: CGPoint(x: x, y: y),
+                                           anchor: .topLeading,
+                                           proposal: ProposedViewSize(item.size))
+                x += item.size.width + spacing
             }
         }
     }
 
     private var lineHeight: CGFloat { 22 }
 
-    private func arrange(_ maxWidth: CGFloat, subviews: Subviews) -> (lines: [[Int: CGSize]], size: CGSize) {
-        var lines: [[Int: CGSize]] = [[Int: CGSize]()]
+    private struct Line {
+        var items: [Item] = []
+        var width: CGFloat = 0
+    }
+
+    /// 按可用宽度分行（保序；行宽含项间间距，不含行尾多余间距）
+    private func arrange(maxWidth: CGFloat, subviews: Subviews) -> [Line] {
+        var lines: [Line] = [Line()]
         var x: CGFloat = 0
-        var widths: [CGFloat] = [0]
         for (i, subview) in subviews.enumerated() {
             let size = subview.sizeThatFits(.unspecified)
-            if x > 0, x + size.width > maxWidth {
-                lines.append([Int: CGSize]())
-                widths.append(0)
+            let needed = (x > 0 ? spacing : 0) + size.width
+            if x > 0, x + needed > maxWidth {
+                lines.append(Line())
                 x = 0
             }
-            lines[lines.count - 1][i] = size
-            x += (x > 0 ? spacing : 0) + size.width
-            widths[widths.count - 1] = x
+            let add = (x > 0 ? spacing : 0) + size.width
+            lines[lines.count - 1].items.append(Item(index: i, size: size))
+            lines[lines.count - 1].width += add
+            x += add
         }
-        let height = CGFloat(lines.count) * lineHeight + CGFloat(max(0, lines.count - 1)) * lineSpacing
-        return (lines, CGSize(width: max(widths.max() ?? 0, 1), height: height))
+        return lines
     }
 }
