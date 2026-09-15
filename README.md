@@ -83,12 +83,12 @@
 
 ```bash
 git clone https://github.com/makamark/wattson-usage && cd wattson-usage
-bash scripts/package-app.sh            # 产物：release/WattsonNative-2.0.2-arm64.dmg
-open release/WattsonNative-2.0.2-arm64.dmg
+bash scripts/package-app.sh            # 产物：release/WattsonNative-2.0.3-arm64.dmg
+open release/WattsonNative-2.0.3-arm64.dmg
 ```
 
 > 命名体系与 Electron 时代的 `Wattson-0.1.x-arm64.dmg`（com.wattson.app）明确区分：
-> 原生版为 **WattsonNative**（Bundle ID `com.wattson.native`），版本从 **2.0.2** 起线。
+> 原生版为 **WattsonNative**（Bundle ID `com.wattson.native`），版本从 **2.0.3** 起线。
 > 两者可并存；经即时通讯/AirDrop 分发需先 `xattr -cr /Applications/WattsonNative.app`。
 
 菜单栏出现 ⚡ 图标：左键看各账号额度速览，「打开看板」进完整窗口。首次运行自动扫描本机数据源并开始采集。开发调试可直接 `swift build -c release && open .build/release/WattsonApp`。

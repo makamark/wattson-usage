@@ -51,7 +51,16 @@ struct DashboardView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(minWidth: 980, minHeight: 640)
-        .background(Theme.bg)
+        .background(
+            ZStack {
+                Theme.bg
+                RadialGradient(colors: [Theme.accent.opacity(0.07), .clear],
+                               center: UnitPoint(x: 0.85, y: -0.1), startRadius: 0, endRadius: 900)
+                RadialGradient(colors: [Color(red: 0xd9/255, green: 0xc5/255, blue: 0x89/255).opacity(0.04), .clear],
+                               center: UnitPoint(x: -0.1, y: 1.1), startRadius: 0, endRadius: 700)
+            }
+            .ignoresSafeArea()
+        )
         .preferredColorScheme(.dark)
         .task { await state.refreshNow() }
     }

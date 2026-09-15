@@ -37,13 +37,24 @@ struct PopupView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 8)
             }
-            .frame(maxHeight: 560)
             footer
         }
-        .frame(width: 384)
-        .background(Theme.bg)
+        // MenuBarExtra window 态按内容理想高度开窗：ScrollView 理想高度为 0，
+        // 不给定固定高度窗口会塌缩成只剩头尾
+        .frame(width: 384, height: 500)
+        .background(popupBackground.ignoresSafeArea())
         .preferredColorScheme(.dark)
         .task { await state.pollQuotaNow() }
+    }
+
+    // MARK: 背景（popup 同款：炭黑底 + 右上角电表绿辉光）
+
+    private var popupBackground: some View {
+        ZStack {
+            Theme.bg
+            RadialGradient(colors: [Theme.accent.opacity(0.10), .clear],
+                           center: UnitPoint(x: 0.9, y: -0.2), startRadius: 10, endRadius: 420)
+        }
     }
 
     // MARK: 头部
@@ -62,7 +73,10 @@ struct PopupView: View {
             }
             .labelsHidden()
             .controlSize(.small)
-            .fixedSize()
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.panel2))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
             chips
         }
         .padding(.horizontal, 13)
@@ -345,17 +359,15 @@ struct PopupView: View {
                 }
             } label: {
                 Text(state.refreshing ? "采集中…" : "刷新数据")
-                    .frame(maxWidth: .infinity)
             }
+            .buttonStyle(PanelButtonStyle())
             .disabled(state.refreshing)
             Button {
                 openDashboard()
             } label: {
                 Text("打开完整看板")
-                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(Theme.accent)
+            .buttonStyle(AccentButtonStyle())
         }
         .controlSize(.regular)
         .padding(10)
@@ -400,5 +412,34 @@ extension RangeOption {
         case .d30: return "30天"
         case .all: return "全部"
         }
+    }
+}
+
+
+// MARK: - 小窗按钮样式（原 popup：panel-2 底 + 描边 / 主按钮 accent 实底）
+
+struct PanelButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12.5))
+            .foregroundColor(configuration.isPressed ? Theme.muted : Theme.text)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity)
+            .background(RoundedRectangle(cornerRadius: 9).fill(configuration.isPressed ? Theme.panel3 : Theme.panel2))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(configuration.isPressed ? Theme.borderStrong : Theme.border))
+    }
+}
+
+struct AccentButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12.5, weight: .medium))
+            .foregroundColor(.white)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity)
+            .background(RoundedRectangle(cornerRadius: 9).fill(configuration.isPressed ? Color(red: 0x63/255, green: 0xb2/255, blue: 0x9c/255) : Theme.accent))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.accent))
     }
 }
