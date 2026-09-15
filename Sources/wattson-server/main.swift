@@ -81,7 +81,7 @@ quotaTimer.resume()
 
 var signalSources: [DispatchSourceSignal] = []
 try server.start()
-print("[wattson-server] http://127.0.0.1:\(port)  records=\(collector.snapshot.rows.count)  localHost=\(collector.localHost)  refresh=\(Int(refreshMinutes))min  config=\(configPath)")
+print("[wattson-server/\(WATTSON_VERSION)] http://127.0.0.1:\(port)  records=\(collector.snapshot.rows.count)  localHost=\(collector.localHost)  refresh=\(Int(refreshMinutes))min  config=\(configPath)")
 
 // 常驻：挂起直到收到 SIGINT/SIGTERM（async 顶层不能调 dispatchMain）
 await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in

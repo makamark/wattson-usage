@@ -3,6 +3,7 @@
 *.xcodeproj
 .DS_Store
 *.log
+release/
 agg.config.json
 .superpowers/
 

@@ -31,7 +31,7 @@ struct DashboardView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("本机 \(state.collector.localHost) · \(Int(state.snapshot.rows.count)) 条用量记录")
+                Text("本机 \(state.collector.localHost) · \(Int(state.snapshot.rows.count)) 条用量记录 · v\(WATTSON_VERSION)-native")
                     .font(.headline)
                 Text(statusLine)
                     .font(.caption)
