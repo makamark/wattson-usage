@@ -190,10 +190,7 @@ struct PopupView: View {
             .frame(height: 14, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
-        .padding(.horizontal, 11)
-        .background(RoundedRectangle(cornerRadius: 11).fill(Theme.panel))
-        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(Theme.border))
+        .wattsonCard(padding: 10, radius: 12)
     }
 
     // MARK: 订阅额度（剩余口径，≤30% 标红）
@@ -242,11 +239,8 @@ struct PopupView: View {
                 popupWindowRow(w)
             }
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 11)
-        .background(RoundedRectangle(cornerRadius: 11).fill(Theme.panel))
-        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(Theme.border))
-        .padding(.bottom, 7)
+        .wattsonCard(padding: 10, radius: 12)
+            .padding(.bottom, 7)
     }
 
     private func popupWindowRow(_ w: QuotaWindow) -> some View {
@@ -265,21 +259,14 @@ struct PopupView: View {
                 .foregroundColor(Theme.muted)
                 .frame(width: 46, alignment: .leading)
                 .lineLimit(1)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Theme.panel2)
-                    Capsule().fill(barColor)
-                        .frame(width: geo.size.width * min(100, max(0, remainPct)) / 100)
-                }
-            }
-            .frame(height: 6)
-            .frame(minWidth: 36)  // 进度条让位：数字区加宽后仍保留最短可视长度
+            quotaBar(fraction: remainPct / 100, color: barColor, height: 6)
+                .frame(minWidth: 36)  // 进度条让位：数字区加宽后仍保留最短可视长度
             Text(nums)
                 .font(.system(size: 10.5, weight: remainPct <= 30 ? .semibold : .regular))
                 .foregroundColor(remainPct <= 30 ? Theme.err : Theme.muted)
                 .monospacedDigit()
                 .fixedSize(horizontal: true, vertical: false)  // 完整显示「剩 N% · 倒计时」
-                .frame(minWidth: 118, alignment: .trailing)
+                .frame(minWidth: 122, alignment: .trailing)
         }
         .padding(.vertical, 2)
     }

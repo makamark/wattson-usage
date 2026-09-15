@@ -52,6 +52,11 @@ enum Theme {
         dynamicColor(rgb(0x8f968a), rgb(0xb9c0ae)),
     ]
 
+    /// 卡片环境阴影（浅色=柔和弥散、深色=更深沉）；替代生硬灰边框的层级表达
+    static var cardShadow: Color {
+        dynamicColor(NSColor.black.withAlphaComponent(0.07), NSColor.black.withAlphaComponent(0.35))
+    }
+
     /// 辉光渐变透明度（浅色下减弱）
     static var glowOpacity: Double { bestMatchDark ? 0.10 : 0.05 }
     static var secondaryGlowOpacity: Double { bestMatchDark ? 0.04 : 0.03 }
@@ -60,10 +65,43 @@ enum Theme {
     }
 }
 
+extension View {
+    /// 统一卡片质感：连续圆角 + 主题面板底 + 柔和弥散阴影 + hairline 描边
+    func wattsonCard(padding: CGFloat = 14, radius: CGFloat = 16) -> some View {
+        self
+            .padding(padding)
+            .background(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(Theme.panel)
+                    .shadow(color: Theme.cardShadow, radius: 14, x: 0, y: 5)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(Theme.border)
+            )
+    }
+}
+
 extension Theme {
     /// AppKit 侧窗口背景（NSWindow.backgroundColor）
     static let nsBg: NSColor = NSColor(name: nil) { appearance in
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? rgb(0x14181a) : rgb(0xf5f5f7)
+    }
+}
+
+extension View {
+    /// 配额进度条：轨道浅面板 + 品牌渐变填充（hot 状态保持警示色）
+    func quotaBar(fraction: Double, color: Color, height: CGFloat = 7) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.panel2)
+                Capsule()
+                    .fill(LinearGradient(colors: [color, color.opacity(0.78)],
+                                         startPoint: .leading, endPoint: .trailing))
+                    .frame(width: geo.size.width * min(1, max(0, fraction)))
+            }
+        }
+        .frame(height: height)
     }
 }
 

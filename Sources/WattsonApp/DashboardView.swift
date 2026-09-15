@@ -171,9 +171,7 @@ private struct Card<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Theme.panel))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border))
+        .wattsonCard()
     }
 }
 
@@ -219,9 +217,7 @@ private struct KpiSection: View {
                     .frame(height: 14, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .background(RoundedRectangle(cornerRadius: 14).fill(Theme.panel))
-                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border))
+                .wattsonCard(padding: 12)
             }
         }
     }
@@ -661,12 +657,12 @@ struct PlanCard: View {
                 }
             }
         }
-        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Theme.panel))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border))
+        .wattsonCard()
     }
 
+    /// 窗口行：三列严格对齐（标签 60 / 进度条弹性 / 数字 168 右对齐），
+    /// 同一卡片内多行进度条起点终点上下一致
     private func windowRow(_ w: QuotaWindow) -> some View {
         // 剩余口径（plan.ts windowRow）：绝对值向上取整；纯百分比 100-已用%
         let hasAbs = w.total != nil
@@ -682,15 +678,9 @@ struct PlanCard: View {
         return HStack(spacing: 8) {
             Text(QuotaShort.window[w.key] ?? w.label)
                 .font(.system(size: 11.5)).foregroundColor(Theme.muted)
-                .frame(width: 58, alignment: .leading).lineLimit(1)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Theme.panel2)
-                    Capsule().fill(barColor)
-                        .frame(width: geo.size.width * min(100, max(0, remainPct)) / 100)
-                }
-            }
-            .frame(height: 6)
+                .frame(width: 60, alignment: .leading).lineLimit(1)
+            quotaBar(fraction: remainPct / 100, color: barColor)
+                .frame(minWidth: 40)
             HStack(spacing: 4) {
                 Text(nums).monospacedDigit()
                 if !reset.isEmpty {
@@ -700,10 +690,10 @@ struct PlanCard: View {
             }
             .font(.system(size: 10.5, weight: remainPct <= 30 ? .semibold : .regular))
             .foregroundColor(remainPct <= 30 ? Theme.err : Theme.muted)
-            .fixedSize(horizontal: true, vertical: false)  // 完整显示「剩 N% · N/N · 倒计时」
-            .frame(alignment: .trailing)
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(minWidth: 168, alignment: .trailing)  // 数字列定宽对齐：多行进度条终点一致
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
     }
 }
 
