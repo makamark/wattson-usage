@@ -4,6 +4,6 @@
 // （Wattson / com.wattson.app / 0.1.0）明确区分。
 import Foundation
 
-public let WATTSON_VERSION = "2.0.6"
+public let WATTSON_VERSION = "2.0.7"
 /// 产品线标识：native = Swift 原生版
 public let WATTSON_CHANNEL = "native"

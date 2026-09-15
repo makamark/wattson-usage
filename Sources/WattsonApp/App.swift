@@ -17,10 +17,10 @@ struct WattsonAppMain: App {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPopoverDelegate {
     let appState = AppState()
     private var statusItem: NSStatusItem?
-    private var popupPanel: PopupPanel?
+    private var popup: NSPopover?
     private var dashboardWindow: NSWindow?
     private var cancellable: AnyCancellable?
     private var lastPopupHideAt: TimeInterval = 0
@@ -49,57 +49,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func statusItemClicked(_ sender: Any?) {
-        guard let event = NSApp.currentEvent else { togglePopup(anchor: nil); return }
-        // 点击点（全局屏幕坐标）＝小窗锚点：小窗永远弹在用户点击的位置下方
-        let anchor = NSEvent.mouseLocation
+        guard let event = NSApp.currentEvent else { togglePopup(); return }
         // ctrl+左键 = 右键等效（macOS 无独立 controlLeftMouseUp 事件类型）
         let isControlClick = event.modifierFlags.contains(.control)
         if event.type == .rightMouseUp || (event.type == .leftMouseUp && isControlClick) {
             showContextMenu()
         } else {
-            togglePopup(anchor: anchor)
+            togglePopup()
         }
     }
 
-    private func togglePopup(anchor: NSPoint?) {
-        // 关键面板刚因点击外部而隐藏时，本次图标点击视为「关闭」而非再打开
-        if Date.timeIntervalSinceReferenceDate - lastPopupHideAt < 0.25 { return }
-        if let panel = popupPanel, panel.isVisible {
-            hidePopup()
+    private func togglePopup() {
+        // 刚因点击外部/再点图标而关闭时，本次点击视为「关闭」而非立即重开
+        if Date.timeIntervalSinceReferenceDate - lastPopupHideAt < 0.3 { return }
+        if let pop = popup, pop.isShown {
+            pop.performClose(nil)
             return
         }
-        let panel = PopupPanel(contentRect: NSRect(x: 0, y: 0, width: 384, height: 500))
-        panel.contentViewController = NSHostingController(
+        guard let button = statusItem?.button else { return }
+        // NSPopover 由系统锚定在状态项图标正下方（Control Center 同款机制）：
+        // 位置随图标所在屏幕自动正确，任何显示器排列下都不会错位
+        let pop = NSPopover()
+        pop.behavior = .transient
+        pop.contentViewController = NSHostingController(
             rootView: PopupView(state: appState, openDashboard: { [weak self] in self?.openDashboard() }))
-        panel.delegate = self
-        positionPanel(panel, anchor: anchor)
-        panel.orderFront(nil)
-        popupPanel = panel
+        pop.delegate = self
+        pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popup = pop
     }
 
     private func hidePopup() {
-        popupPanel?.orderOut(nil)
-        popupPanel = nil
-        lastPopupHideAt = Date.timeIntervalSinceReferenceDate
-    }
-
-    private func positionPanel(_ panel: NSPanel, anchor: NSPoint?) {
-        // 锚点 = 用户点击的位置（屏幕坐标）：小窗水平居中于锚点、顶边在锚点下方 4pt；
-        // 无锚点时回退屏幕右上角。最后钳制在可见屏幕内（防超出屏幕范围）。
-        var origin: NSPoint
-        if let anchor {
-            origin = NSPoint(x: anchor.x - panel.frame.width / 2, y: anchor.y - panel.frame.height - 4)
-        } else if let visible = NSScreen.main?.visibleFrame {
-            origin = NSPoint(x: visible.maxX - panel.frame.width - 8,
-                             y: visible.maxY - panel.frame.height - 4)
-        } else {
-            origin = NSPoint(x: 0, y: 0)
-        }
-        if let visible = NSScreen.main?.visibleFrame {
-            origin.x = min(max(origin.x, visible.minX + 8), visible.maxX - panel.frame.width - 8)
-            origin.y = max(origin.y, visible.minY + 8)
-        }
-        panel.setFrameOrigin(origin)
+        popup?.performClose(nil)
     }
 
     // MARK: 右键菜单（原 trayMenu 语义）
@@ -180,11 +160,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    // MARK: NSWindowDelegate
+    // MARK: NSPopoverDelegate / NSWindowDelegate
 
-    func windowDidResignKey(_ notification: Notification) {
-        guard let panel = notification.object as? PopupPanel, panel == popupPanel else { return }
-        hidePopup()
+    func popoverDidClose(_ notification: Notification) {
+        lastPopupHideAt = Date.timeIntervalSinceReferenceDate
+        popup = nil
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -195,22 +175,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private var loginItemEnabled: Bool {
         SMAppService.mainApp.status == .enabled
-    }
-}
-
-/// 状态栏小窗面板：无边框、不抢焦点、状态栏层级
-final class PopupPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
-
-    init(contentRect: NSRect) {
-        super.init(contentRect: contentRect,
-                   styleMask: [.borderless, .nonactivatingPanel],
-                   backing: .buffered, defer: false)
-        isFloatingPanel = true
-        level = .statusBar
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        isMovableByWindowBackground = false
-        hidesOnDeactivate = false
-        backgroundColor = .clear
     }
 }

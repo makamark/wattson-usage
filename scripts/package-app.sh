@@ -12,7 +12,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-VERSION="${1:-2.0.6}"
+VERSION="${1:-2.0.7}"
 PRODUCT="WattsonNative"
 APP_ID="com.wattson.native"
 ARCH="$(uname -m)"
