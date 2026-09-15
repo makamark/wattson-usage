@@ -5,6 +5,7 @@ import WattsonCore
 import Foundation
 import AppKit
 import Combine
+import ServiceManagement
 
 @MainActor
 final class AppState: ObservableObject {
@@ -17,13 +18,17 @@ final class AppState: ObservableObject {
     /// 看板全局筛选（web/src/state.ts filters，默认 30d × model × tokens）
     @Published var filters = DashboardFilters()
 
+    /// 主面板设置区显隐（顶栏齿轮 / 状态栏右键「设置…」控制）
+    @Published var showDashboardSettings = false
+
     let collector: Collector
     let poller: QuotaPoller
     private var server: AggServer?
     private var timer: Any?
+    private var mirrorRunning = false
 
-    let port: Int
-    let refreshMinutes: Double
+    var port: Int
+    var refreshMinutes: Double
     let configPath: String
     let instanceId = UUID().uuidString
 
@@ -78,6 +83,98 @@ final class AppState: ObservableObject {
 
     func pollQuotaNow() async {
         quota = await poller.current()
+    }
+
+    // MARK: 设置应用与服务器重启（主面板设置页）
+
+    /// 保存 agg.config.json（保留 devices 节）并重启 API 服务
+    func applySettings(port newPort: Int, refreshMinutes newRefresh: Double) {
+        let path = configPath
+        var obj: [String: Any] = (try? JSONSerialization.jsonObject(
+            with: Data(contentsOf: URL(fileURLWithPath: path)))) as? [String: Any] ?? [:]
+        var serverSection = obj["server"] as? [String: Any] ?? [:]
+        serverSection["port"] = newPort
+        serverSection["refreshMinutes"] = Int(newRefresh)
+        obj["server"] = serverSection
+        if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: URL(fileURLWithPath: path))
+        }
+        port = newPort
+        refreshMinutes = newRefresh
+        restartServer()
+    }
+
+    private func restartServer() {
+        server?.stop()
+        let c = collector
+        let p = poller
+        let cfg = configPath
+        let id = instanceId
+        let trigger: () -> Void = { Task { _ = await c.refresh(); _ = await p.current() } }
+        let s = AggServer(port: port, collector: c, quotaPoller: p,
+                          instanceId: id, configPath: cfg, refreshTrigger: trigger)
+        try? s.start()
+        server = s
+    }
+
+    // MARK: 状态栏右键动作
+
+    /// 立即同步远端：跑打包内置的 mirror.sh（AGG_CONFIG 指向当前配置），日志追加到 mirror.log
+    func runMirrorNow() {
+        guard !mirrorRunning else { return }
+        guard let script = Bundle.module.path(forResource: "mirror", ofType: "sh", inDirectory: "Resources")
+        else { return }
+        mirrorRunning = true
+        let configPath = self.configPath
+        let dataDir = ((NSHomeDirectory() as NSString).appendingPathComponent("wattson"))
+        let logPath = (dataDir as NSString).appendingPathComponent("mirror.log")
+        DispatchQueue.global(qos: .utility).async {
+            defer { DispatchQueue.main.async { self.mirrorRunning = false } }
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/bash")
+            p.arguments = [script]
+            var env = ProcessInfo.processInfo.environment
+            env["AGG_CONFIG"] = configPath
+            env["MIRROR_BASE"] = (dataDir as NSString).appendingPathComponent("mirror")
+            p.environment = env
+            if !FileManager.default.fileExists(atPath: logPath) {
+                FileManager.default.createFile(atPath: logPath, contents: nil)
+            }
+            let handle = FileHandle(forWritingAtPath: logPath)
+            defer { try? handle?.close() }
+            if let handle {
+                let stamp = "\n[mirror] 手动同步 \(Date())\n"
+                handle.seekToEndOfFile()
+                handle.write(stamp.data(using: .utf8)!)
+                p.standardOutput = handle
+                p.standardError = handle
+            }
+            try? p.run()
+            p.waitUntilExit()
+        }
+    }
+
+    var isMirrorRunning: Bool { mirrorRunning }
+
+    var loginItemEnabled: Bool {
+        SMAppService.mainApp.status == .enabled
+    }
+
+    func toggleLoginItem() {
+        switch SMAppService.mainApp.status {
+        case .enabled: try? SMAppService.mainApp.unregister()
+        default: try? SMAppService.mainApp.register()
+        }
+    }
+
+    func openLogFile() {
+        let dir = (NSHomeDirectory() as NSString).appendingPathComponent("wattson")
+        let log = (dir as NSString).appendingPathComponent("server.log")
+        if FileManager.default.fileExists(atPath: log) {
+            NSWorkspace.shared.open(URL(fileURLWithPath: log))
+        } else {
+            NSWorkspace.shared.open(URL(fileURLWithPath: dir))
+        }
     }
 
     private func scheduleQuotaPoll() {

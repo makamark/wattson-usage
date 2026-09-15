@@ -60,6 +60,13 @@ enum Theme {
     }
 }
 
+extension Theme {
+    /// AppKit 侧窗口背景（NSWindow.backgroundColor）
+    static let nsBg: NSColor = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? rgb(0x14181a) : rgb(0xf5f5f7)
+    }
+}
+
 // MARK: - 格式化（web/src/format.ts 同口径）
 
 enum Fmt {

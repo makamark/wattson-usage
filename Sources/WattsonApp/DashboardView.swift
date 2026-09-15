@@ -1,147 +1,57 @@
-// DashboardView.swift — 完整看板（web 看板的 1:1 移植）。
-// 布局：左侧 Sidebar（品牌 + 总览/用量/额度/设备/设置 路由 + 底部标语）+
-// 顶栏（范围/指标切换 + 数据时间 + 刷新）+ 页面区块 + 底部状态区。
+// DashboardView.swift — 完整看板（web 看板的 1:1 移植，单页布局）。
+// 布局：顶栏（品牌 + 范围/指标切换 + 数据时间 + 刷新 + 设置齿轮）+ 全部区块
+// 单页展示（KPI / 筛选条 / 用量趋势 / 订阅额度 / 设备 / 矩阵 / 模型明细）+
+// 底部状态区。设置区由顶栏齿轮或状态栏右键「设置…」显隐。
 // 全部区块共享同一份筛选（range + hosts/tools/models/projects + metric/group），
 // 数据取进程内聚合（等价 HTTP /api/*）。
 import SwiftUI
 import Charts
 import WattsonCore
 
-// MARK: - 路由（nav.ts PAGES）
-
-enum DashboardRoute: String, CaseIterable, Identifiable {
-    case overview, usage, plans, hosts, settings
-    var id: String { rawValue }
-    var label: String {
-        switch self {
-        case .overview: return "总览"
-        case .usage: return "用量"
-        case .plans: return "额度"
-        case .hosts: return "设备"
-        case .settings: return "设置"
-        }
-    }
-    var icon: String {
-        switch self {
-        case .overview: return "house"
-        case .usage: return "chart.bar"
-        case .plans: return "square.stack.3d.up"
-        case .hosts: return "display"
-        case .settings: return "gearshape"
-        }
-    }
-}
-
 struct DashboardView: View {
     @ObservedObject var state: AppState
-    @State private var route: DashboardRoute = .overview
 
     var body: some View {
-        HStack(spacing: 0) {
-            sidebar
-            VStack(spacing: 0) {
-                topbar
-                ScrollView {
-                    page
-                        .padding(.horizontal, 20)
-                        .padding(.top, 10)
-                }
-                statusFooter
+        VStack(spacing: 0) {
+            topbar
+            ScrollView {
+                page
+                    .padding(.horizontal, 20)
+                    .padding(.top, 10)
             }
-            .frame(maxWidth: .infinity)
+            statusFooter
         }
+        .frame(maxWidth: .infinity)
         .frame(minWidth: 980, minHeight: 640)
-        .background(
-            ZStack {
-                Theme.bg
-                RadialGradient(colors: [Theme.accent.opacity(Theme.glowOpacity), .clear],
-                               center: UnitPoint(x: 0.85, y: -0.1), startRadius: 0, endRadius: 900)
-                RadialGradient(colors: [Color(red: 0xd9/255, green: 0xc5/255, blue: 0x89/255).opacity(Theme.secondaryGlowOpacity), .clear],
-                               center: UnitPoint(x: -0.1, y: 1.1), startRadius: 0, endRadius: 700)
-            }
-            .ignoresSafeArea()
-        )
+        .background(dashboardBackground)
+        .preferredColorScheme(nil)
         .task { await state.refreshNow() }
     }
 
-    // MARK: Sidebar（nav.ts：总览/用量/额度/设备/设置 + 底部标语）
-
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                BrandMark(size: 34)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Wattson").font(.system(size: 16, weight: .semibold))
-                    Text("看懂你的 AI 用量").font(.system(size: 11)).foregroundColor(Theme.muted)
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.top, 2)
-            .padding(.bottom, 16)
-
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(DashboardRoute.allCases) { r in
-                    Button {
-                        route = r
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: r.icon).frame(width: 18)
-                            Text(r.label)
-                            Spacer()
-                        }
-                        .font(.system(size: 13.5))
-                        .foregroundColor(route == r ? .white : Theme.muted)
-                        .padding(.vertical, 9)
-                        .padding(.horizontal, 12)
-                        .background(RoundedRectangle(cornerRadius: 10)
-                            .fill(route == r ? Theme.accentSoft : Color.clear))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            Spacer()
-            Text("更清楚地用 AI\n迎接更有产出的明天")
-                .font(.system(size: 11))
-                .foregroundColor(Theme.muted2)
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .overlay(Divider().overlay(Theme.border), alignment: .top)
+    /// 炭黑/浅色自适应底 + 双辉光（同 web style.css 的 radial-gradient）
+    private var dashboardBackground: some View {
+        ZStack {
+            Theme.bg
+            RadialGradient(colors: [Theme.accent.opacity(Theme.glowOpacity), .clear],
+                           center: UnitPoint(x: 0.85, y: -0.1), startRadius: 0, endRadius: 900)
+            RadialGradient(colors: [Color(red: 0xd9/255, green: 0xc5/255, blue: 0x89/255)
+                                        .opacity(Theme.secondaryGlowOpacity), .clear],
+                           center: UnitPoint(x: -0.1, y: 1.1), startRadius: 0, endRadius: 700)
         }
-        .padding(.vertical, 18)
-        .padding(.horizontal, 12)
-        .frame(width: 212)
-        .background(Theme.bgSoft)
-        .overlay(Divider().overlay(Theme.border), alignment: .trailing)
+        .ignoresSafeArea()
     }
 
-    // MARK: 顶栏（main.ts renderTopbar：范围 + 指标 + 数据时间 + 刷新）
+    // MARK: 顶栏（品牌 + 范围/指标 + 数据时间 + 刷新 + 设置齿轮）
 
     private var topbar: some View {
         HStack(spacing: 8) {
-            Picker("", selection: $state.filters.range) {
-                ForEach(RangeOption.allCases) { r in Text(r.label).tag(r) }
-            }
-            .labelsHidden()
-            .fixedSize()
-            Picker("", selection: $state.filters.metric) {
-                ForEach(MetricOption.allCases) { m in Text(m.label).tag(m) }
-            }
-            .labelsHidden()
-            .fixedSize()
+            brand
+            rangePicker
+            metricPicker
             Spacer()
-            HStack(spacing: 6) {
-                Circle().fill(state.snapshot.refreshing ? Theme.warn : Theme.ok).frame(width: 7, height: 7)
-                Text("数据 \(Fmt.time(state.snapshot.lastSuccessAt ?? state.snapshot.fetchedAt))")
-                    .font(.system(size: 12.5))
-                    .foregroundColor(Theme.muted)
-            }
-            Button {
-                Task { await state.refreshNow() }
-            } label: {
-                Label(state.refreshing ? "采集中…" : "刷新", systemImage: "arrow.clockwise")
-            }
-            .disabled(state.refreshing)
+            dataTime
+            refreshButton
+            settingsToggle
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
@@ -149,27 +59,71 @@ struct DashboardView: View {
         .overlay(Divider().overlay(Theme.border), alignment: .bottom)
     }
 
-    // MARK: 页面（main.ts PAGES）
+    private var brand: some View {
+        HStack(spacing: 6) {
+            BrandMark(size: 20)
+            Text("Wattson").font(.system(size: 13, weight: .semibold))
+        }
+    }
+
+    private var rangePicker: some View {
+        Picker("", selection: $state.filters.range) {
+            ForEach(RangeOption.allCases) { r in Text(r.label).tag(r) }
+        }
+        .labelsHidden()
+        .fixedSize()
+    }
+
+    private var metricPicker: some View {
+        Picker("", selection: $state.filters.metric) {
+            ForEach(MetricOption.allCases) { m in Text(m.label).tag(m) }
+        }
+        .labelsHidden()
+        .fixedSize()
+    }
+
+    private var dataTime: some View {
+        HStack(spacing: 6) {
+            Circle().fill(state.snapshot.refreshing ? Theme.warn : Theme.ok).frame(width: 7, height: 7)
+            Text("数据 \(Fmt.time(state.snapshot.lastSuccessAt ?? state.snapshot.fetchedAt))")
+                .font(.system(size: 12.5))
+                .foregroundColor(Theme.muted)
+        }
+    }
+
+    private var refreshButton: some View {
+        Button {
+            Task { await state.refreshNow() }
+        } label: {
+            Label(state.refreshing ? "采集中…" : "刷新", systemImage: "arrow.clockwise")
+        }
+        .disabled(state.refreshing)
+    }
+
+    private var settingsToggle: some View {
+        Button {
+            state.showDashboardSettings.toggle()
+        } label: {
+            Image(systemName: state.showDashboardSettings ? "gearshape.fill" : "gearshape")
+                .font(.system(size: 13))
+        }
+        .help("设置")
+    }
+
+    // MARK: 页面（单页：全部区块）
 
     @ViewBuilder private var page: some View {
         VStack(alignment: .leading, spacing: 14) {
-            switch route {
-            case .overview:
-                KpiSection(state: state)
-                FilterBarSection(state: state)
-                MainChartSection(state: state)
-                PlanSection(state: state)
-            case .usage:
-                FilterBarSection(state: state)
-                MatrixSection(state: state)
-                ModelsSection(state: state)
-            case .plans:
-                PlanSection(state: state)
-            case .hosts:
-                HostsSection(state: state)
-            case .settings:
+            if state.showDashboardSettings {
                 SettingsSection(state: state)
             }
+            KpiSection(state: state)
+            FilterBarSection(state: state)
+            MainChartSection(state: state)
+            PlanSection(state: state)
+            HostsSection(state: state)
+            MatrixSection(state: state)
+            ModelsSection(state: state)
             Spacer(minLength: 8)
         }
         .padding(.bottom, 8)
@@ -192,7 +146,7 @@ struct DashboardView: View {
                     .foregroundColor(Theme.err)
                     .lineLimit(1)
             }
-            Text("数据口径与配置来源见「设置」页").font(.system(size: 12)).foregroundColor(Theme.muted2)
+            Text("数据口径与配置来源见「设置」").font(.system(size: 12)).foregroundColor(Theme.muted2)
             Spacer()
             if let note = state.proxyNote {
                 Text(note).font(.system(size: 11)).foregroundColor(Theme.muted2)
@@ -572,7 +526,62 @@ struct PlanCard: View {
     }
 }
 
-// MARK: - 用量页：矩阵 + 模型明细
+// MARK: - 设备区（hosts.ts：份额卡 + 设备×时间图）
+
+private struct HostsSection: View {
+    @ObservedObject var state: AppState
+
+    var body: some View {
+        let f = state.filters
+        let data = state.overviewData(f)
+        let hosts = data.facetHost.filter { $0.1.tokens > 0 }
+        if hosts.isEmpty {
+            EmptyView()
+        } else {
+            let total = hosts.reduce(0.0) { $0 + $1.1.tokens }
+            VStack(alignment: .leading, spacing: 14) {
+                Text("设备").font(.system(size: 14, weight: .semibold))
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12)], spacing: 12) {
+                    ForEach(hosts, id: \.0) { name, entry in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Circle().fill(Theme.accent).frame(width: 8, height: 8)
+                                Text(name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                                Spacer()
+                                Text(String(format: "%.1f%%", entry.tokens / total * 100))
+                                    .font(.system(size: 12)).foregroundColor(Theme.muted).monospacedDigit()
+                            }
+                            Text(Fmt.tokens(entry.tokens)).font(.system(size: 20, weight: .semibold)).monospacedDigit()
+                            Text("\(Fmt.cost(entry.cost)) · \(Fmt.int(entry.calls)) 次调用")
+                                .font(.system(size: 11.5)).foregroundColor(Theme.muted).monospacedDigit()
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(Theme.panel2)
+                                    Capsule().fill(Theme.accent)
+                                        .frame(width: geo.size.width * entry.tokens / total)
+                                }
+                            }
+                            .frame(height: 6)
+                        }
+                        .padding(14)
+                        .background(RoundedRectangle(cornerRadius: 14).fill(Theme.panel))
+                        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border))
+                    }
+                }
+                Card {
+                    HStack {
+                        Text("设备 × 时间（\(f.metric.label)）").font(.system(size: 14, weight: .semibold))
+                        Spacer()
+                    }
+                    SeriesChart(result: state.seriesData(f, group: .host), metric: f.metric, hourly: f.range.isHourly)
+                        .frame(height: 240)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 矩阵 + 模型明细
 
 private struct MatrixSection: View {
     @ObservedObject var state: AppState
@@ -651,65 +660,46 @@ private struct ModelsSection: View {
     }
 }
 
-// MARK: - 设备页（hosts.ts：份额卡 + 设备×时间图）
-
-private struct HostsSection: View {
-    @ObservedObject var state: AppState
-
-    var body: some View {
-        let f = state.filters
-        let data = state.overviewData(f)
-        let hosts = data.facetHost.filter { $0.1.tokens > 0 }
-        if hosts.isEmpty {
-            Text("暂无设备数据").font(.system(size: 12)).foregroundColor(Theme.muted)
-        } else {
-            let total = hosts.reduce(0.0) { $0 + $1.1.tokens }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12)], spacing: 12) {
-                ForEach(hosts, id: \.0) { name, entry in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Circle().fill(Theme.accent).frame(width: 8, height: 8)
-                            Text(name).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                            Spacer()
-                            Text(String(format: "%.1f%%", entry.tokens / total * 100))
-                                .font(.system(size: 12)).foregroundColor(Theme.muted).monospacedDigit()
-                        }
-                        Text(Fmt.tokens(entry.tokens)).font(.system(size: 20, weight: .semibold)).monospacedDigit()
-                        Text("\(Fmt.cost(entry.cost)) · \(Fmt.int(entry.calls)) 次调用")
-                            .font(.system(size: 11.5)).foregroundColor(Theme.muted).monospacedDigit()
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(Theme.panel2)
-                                Capsule().fill(Theme.accent)
-                                    .frame(width: geo.size.width * entry.tokens / total)
-                            }
-                        }
-                        .frame(height: 6)
-                    }
-                    .padding(14)
-                    .background(RoundedRectangle(cornerRadius: 14).fill(Theme.panel))
-                    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border))
-                }
-            }
-            Card {
-                HStack {
-                    Text("设备 × 时间（\(f.metric.label)）").font(.system(size: 14, weight: .semibold))
-                    Spacer()
-                }
-                SeriesChart(result: state.seriesData(f, group: .host), metric: f.metric, hourly: f.range.isHourly)
-                    .frame(height: 260)
-            }
-        }
-    }
-}
-
-// MARK: - 设置页（settings.ts：服务状态 / 配置来源 / 数据口径）
+// MARK: - 设置区（settings.ts：设置表单 + 服务状态 / 配置来源 / 数据口径）
 
 private struct SettingsSection: View {
     @ObservedObject var state: AppState
+    @State private var portText = ""
+    @State private var refreshText = ""
+    @State private var saved = false
 
     var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 12)], spacing: 12) {
+            Card(title: "设置") {
+                HStack(spacing: 10) {
+                    Text("监听端口").font(.system(size: 12.5)).foregroundColor(Theme.muted)
+                    TextField("8317", text: $portText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 90)
+                        .monospacedDigit()
+                    Text("刷新间隔（分钟）").font(.system(size: 12.5)).foregroundColor(Theme.muted)
+                    TextField("30", text: $refreshText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 60)
+                        .monospacedDigit()
+                    Button("保存并应用") { save() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.accent)
+                    if saved {
+                        Text("已应用 ✓").font(.system(size: 11.5)).foregroundColor(Theme.ok)
+                    }
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 10) {
+                    Button("打开配置文件") {
+                        NSWorkspace.shared.open(URL(fileURLWithPath: state.configPath))
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 11.5))
+                    Text(state.configPath).font(.system(size: 10.5)).foregroundColor(Theme.muted2).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+            }
             Card(title: "服务状态") {
                 row("本机设备", state.collector.localHost)
                 row("监听端口", String(state.port))
@@ -718,6 +708,7 @@ private struct SettingsSection: View {
                 row("采集状态", state.snapshot.refreshing
                     ? "解析中…"
                     : (state.snapshot.errors.isEmpty ? "正常" : "异常 ×\(state.snapshot.errors.count)"))
+                row("远端镜像", state.isMirrorRunning ? "同步中…" : "空闲（状态栏右键可手动触发）")
             }
             Card(title: "配置来源") {
                 row("配置文件", state.configPath)
@@ -736,6 +727,18 @@ private struct SettingsSection: View {
                 .lineSpacing(4)
             }
         }
+        .onAppear {
+            if portText.isEmpty { portText = String(state.port) }
+            if refreshText.isEmpty { refreshText = String(Int(state.refreshMinutes)) }
+        }
+    }
+
+    private func save() {
+        guard let port = Int(portText), (1...65535).contains(port),
+              let refresh = Double(refreshText), refresh >= 1, refresh <= 24 * 60 else { return }
+        state.applySettings(port: port, refreshMinutes: refresh)
+        withAnimation { saved = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saved = false }
     }
 
     private func row(_ k: String, _ v: String) -> some View {

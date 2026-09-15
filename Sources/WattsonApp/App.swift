@@ -1,33 +1,216 @@
-// App.swift — Wattson 原生菜单栏 App：状态栏小窗（window 态）+ 完整看板窗口 + 本机 API 服务。
+// App.swift — Wattson 原生菜单栏 App（AppKit 托管 + SwiftUI 视图）。
+// 状态栏图标：左键弹状态栏小窗（原 popup 语义），右键弹菜单
+// （打开完整看板 / 刷新数据 / 设置… / 立即同步远端 / 登录时启动 / 查看日志… / 退出），
+// 与原 Electron 托盘行为一一对应。看板窗口由本类托管，设置入口整合在主面板侧栏。
 import WattsonCore
 import SwiftUI
+import AppKit
+import Combine
+import ServiceManagement
 
 @main
 struct WattsonAppMain: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var appState = AppState()
-    @Environment(\.openWindow) private var openWindow
-
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var body: some Scene {
-        MenuBarExtra {
-            PopupView(state: appState) {
-                openWindow(id: "dashboard")
-                NSApp.activate(ignoringOtherApps: true)
-            }
-        } label: {
-            Text(appState.menuTitle)
-        }
-        .menuBarExtraStyle(.window)
-
-        WindowGroup("Wattson · AI 用量看板", id: "dashboard") {
-            DashboardView(state: appState)
-        }
-        .defaultSize(width: 1180, height: 800)
+        Settings { EmptyView() }
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+    let appState = AppState()
+    private var statusItem: NSStatusItem?
+    private var popupPanel: PopupPanel?
+    private var dashboardWindow: NSWindow?
+    private var cancellable: AnyCancellable?
+    private var lastPopupHideAt: TimeInterval = 0
+    private var mirrorProcessRunning = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        setupStatusItem()
+        cancellable = appState.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.statusItem?.button?.title = self?.appState.menuTitle ?? "⚡"
+            }
+        }
+    }
+
+    // MARK: 状态栏图标（左键小窗 / 右键菜单）
+
+    private func setupStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.button?.title = appState.menuTitle
+        item.button?.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize - 1, weight: .medium)
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        item.button?.target = self
+        item.button?.action = #selector(statusItemClicked(_:))
+        statusItem = item
+    }
+
+    @objc private func statusItemClicked(_ sender: Any?) {
+        guard let event = NSApp.currentEvent else { togglePopup(anchor: nil); return }
+        // 点击点（全局屏幕坐标）＝小窗锚点：小窗永远弹在用户点击的位置下方
+        let anchor = NSEvent.mouseLocation
+        // ctrl+左键 = 右键等效（macOS 无独立 controlLeftMouseUp 事件类型）
+        let isControlClick = event.modifierFlags.contains(.control)
+        if event.type == .rightMouseUp || (event.type == .leftMouseUp && isControlClick) {
+            showContextMenu()
+        } else {
+            togglePopup(anchor: anchor)
+        }
+    }
+
+    private func togglePopup(anchor: NSPoint?) {
+        // 关键面板刚因点击外部而隐藏时，本次图标点击视为「关闭」而非再打开
+        if Date.timeIntervalSinceReferenceDate - lastPopupHideAt < 0.25 { return }
+        if let panel = popupPanel, panel.isVisible {
+            hidePopup()
+            return
+        }
+        let panel = PopupPanel(contentRect: NSRect(x: 0, y: 0, width: 384, height: 500))
+        panel.contentViewController = NSHostingController(
+            rootView: PopupView(state: appState, openDashboard: { [weak self] in self?.openDashboard() }))
+        panel.delegate = self
+        positionPanel(panel, anchor: anchor)
+        panel.orderFront(nil)
+        popupPanel = panel
+    }
+
+    private func hidePopup() {
+        popupPanel?.orderOut(nil)
+        popupPanel = nil
+        lastPopupHideAt = Date.timeIntervalSinceReferenceDate
+    }
+
+    private func positionPanel(_ panel: NSPanel, anchor: NSPoint?) {
+        // 锚点 = 用户点击的位置（屏幕坐标）：小窗水平居中于锚点、顶边在锚点下方 4pt；
+        // 无锚点时回退屏幕右上角。最后钳制在可见屏幕内（防超出屏幕范围）。
+        var origin: NSPoint
+        if let anchor {
+            origin = NSPoint(x: anchor.x - panel.frame.width / 2, y: anchor.y - panel.frame.height - 4)
+        } else if let visible = NSScreen.main?.visibleFrame {
+            origin = NSPoint(x: visible.maxX - panel.frame.width - 8,
+                             y: visible.maxY - panel.frame.height - 4)
+        } else {
+            origin = NSPoint(x: 0, y: 0)
+        }
+        if let visible = NSScreen.main?.visibleFrame {
+            origin.x = min(max(origin.x, visible.minX + 8), visible.maxX - panel.frame.width - 8)
+            origin.y = max(origin.y, visible.minY + 8)
+        }
+        panel.setFrameOrigin(origin)
+    }
+
+    // MARK: 右键菜单（原 trayMenu 语义）
+
+    private func showContextMenu() {
+        hidePopup() // 右键菜单弹出前先收起小窗（若有）
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let open = NSMenuItem(title: "打开完整看板", action: #selector(menuOpenDashboard), keyEquivalent: "")
+        open.target = self
+        menu.addItem(open)
+
+        let refresh = NSMenuItem(title: appState.refreshing ? "采集中…" : "刷新数据",
+                                 action: appState.refreshing ? nil : #selector(menuRefresh), keyEquivalent: "")
+        refresh.target = self
+        menu.addItem(refresh)
+        menu.addItem(.separator())
+
+        let settings = NSMenuItem(title: "设置…（设备与初始化）", action: #selector(menuOpenSettings), keyEquivalent: "")
+        settings.target = self
+        menu.addItem(settings)
+
+        let sync = NSMenuItem(title: mirrorProcessRunning ? "同步远端中…" : "立即同步远端",
+                              action: mirrorProcessRunning ? nil : #selector(menuSyncRemote), keyEquivalent: "")
+        sync.target = self
+        menu.addItem(sync)
+        menu.addItem(.separator())
+
+        let login = NSMenuItem(title: "登录时启动", action: #selector(menuToggleLoginItem), keyEquivalent: "")
+        login.target = self
+        login.state = loginItemEnabled ? .on : .off
+        menu.addItem(login)
+        menu.addItem(.separator())
+
+        let log = NSMenuItem(title: "查看日志…", action: #selector(menuOpenLogFile), keyEquivalent: "")
+        log.target = self
+        menu.addItem(log)
+
+        let quit = NSMenuItem(title: "退出 Wattson", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        menu.addItem(quit)
+
+        statusItem?.menu = menu
+        statusItem?.button?.performClick(nil) // 以图标为锚弹出菜单
+        statusItem?.menu = nil                // 菜单关闭后恢复左键行为
+    }
+
+    @objc private func menuOpenDashboard() { openDashboard() }
+    @objc private func menuRefresh() { Task { await appState.refreshNow() } }
+    @objc private func menuOpenSettings() {
+        appState.showDashboardSettings = true
+        openDashboard()
+    }
+    @objc private func menuSyncRemote() { appState.runMirrorNow() }
+    @objc private func menuToggleLoginItem() { appState.toggleLoginItem() }
+    @objc private func menuOpenLogFile() { appState.openLogFile() }
+
+    // MARK: 看板窗口
+
+    func openDashboard() {
+        hidePopup()
+        if let win = dashboardWindow {
+            win.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 800),
+                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                           backing: .buffered, defer: false)
+        win.title = "Wattson · AI 用量看板"
+        win.backgroundColor = Theme.nsBg
+        win.minSize = NSSize(width: 980, height: 640)
+        win.isReleasedWhenClosed = false
+        win.contentView = NSHostingView(rootView: DashboardView(state: appState))
+        win.center()
+        win.makeKeyAndOrderFront(nil)
+        dashboardWindow = win
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: NSWindowDelegate
+
+    func windowDidResignKey(_ notification: Notification) {
+        guard let panel = notification.object as? PopupPanel, panel == popupPanel else { return }
+        hidePopup()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        if let win = notification.object as? NSWindow, win == dashboardWindow {
+            dashboardWindow = nil
+        }
+    }
+
+    private var loginItemEnabled: Bool {
+        SMAppService.mainApp.status == .enabled
+    }
+}
+
+/// 状态栏小窗面板：无边框、不抢焦点、状态栏层级
+final class PopupPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+
+    init(contentRect: NSRect) {
+        super.init(contentRect: contentRect,
+                   styleMask: [.borderless, .nonactivatingPanel],
+                   backing: .buffered, defer: false)
+        isFloatingPanel = true
+        level = .statusBar
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        isMovableByWindowBackground = false
+        hidesOnDeactivate = false
+        backgroundColor = .clear
     }
 }
