@@ -12,7 +12,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-VERSION="${1:-2.0.7}"
+VERSION="${1:-2.0.8}"
 PRODUCT="WattsonNative"
 APP_ID="com.wattson.native"
 ARCH="$(uname -m)"
@@ -79,13 +79,45 @@ with open("release/%s.app/Contents/Info.plist" % os.environ['PLIST_PRODUCT'], "w
 PY
 codesign --force -s - "$APP"
 
-echo "[5/5] 制作 DMG"
+echo "[5/5] 制作 DMG（含 Applications 拖拽快捷方式）"
 mkdir -p "$STAGE"
-rm -rf "$STAGE"/*.app
+rm -rf "$STAGE"/*
 cp -R "$APP" "$STAGE/"
+ln -s /Applications "$STAGE/Applications"
 DMG="$OUT/$PRODUCT-$VERSION-$ARCH.dmg"
-rm -f "$DMG"
-hdiutil create -volname "$PRODUCT $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+RAW="$OUT/$PRODUCT-tmp-raw.dmg"
+rm -f "$DMG" "$RAW"
+# 先做可写镜像，mount 后用 Finder 排布图标（App 与 Applications 并排、大图标），再转压缩格式
+hdiutil create -volname "$PRODUCT" -srcfolder "$STAGE" -ov -format UDRW "$RAW" >/dev/null
+MOUNT="/Volumes/$PRODUCT"
+hdiutil attach "$RAW" -nobrowse -quiet
+osascript <<OSA
+tell application "Finder"
+  -- 等待 Finder 识别新挂载的卷（最多 10s）
+  repeat with i from 1 to 20
+    if exists disk "$PRODUCT" then exit repeat
+    delay 0.5
+  end repeat
+  tell disk "$PRODUCT"
+    open
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set bounds of container window to {180, 120, 700, 420}
+    set theViewOptions to the icon view options of container window
+    set arrangement of theViewOptions to not arranged
+    set icon size of theViewOptions to 88
+    set position of item "$PRODUCT" of container window to {140, 120}
+    set position of item "Applications" of container window to {380, 120}
+    close
+    open
+  end tell
+end tell
+OSA
+sleep 2
+hdiutil detach "$MOUNT" -quiet
+hdiutil convert "$RAW" -format UDZO -o "$DMG" >/dev/null
+rm -f "$RAW"
 rm -rf "$STAGE"
 
 echo "完成："

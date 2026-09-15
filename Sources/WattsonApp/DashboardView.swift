@@ -102,9 +102,9 @@ struct DashboardView: View {
 
     private var settingsToggle: some View {
         Button {
-            state.showDashboardSettings.toggle()
+            state.requestOpenSettings()
         } label: {
-            Image(systemName: state.showDashboardSettings ? "gearshape.fill" : "gearshape")
+            Image(systemName: "gearshape")
                 .font(.system(size: 13))
         }
         .help("设置")
@@ -114,9 +114,6 @@ struct DashboardView: View {
 
     @ViewBuilder private var page: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if state.showDashboardSettings {
-                SettingsSection(state: state)
-            }
             KpiSection(state: state)
             FilterBarSection(state: state)
             MainChartSection(state: state)
@@ -657,96 +654,5 @@ private struct ModelsSection: View {
                 }
             }
         }
-    }
-}
-
-// MARK: - 设置区（settings.ts：设置表单 + 服务状态 / 配置来源 / 数据口径）
-
-private struct SettingsSection: View {
-    @ObservedObject var state: AppState
-    @State private var portText = ""
-    @State private var refreshText = ""
-    @State private var saved = false
-
-    var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 12)], spacing: 12) {
-            Card(title: "设置") {
-                HStack(spacing: 10) {
-                    Text("监听端口").font(.system(size: 12.5)).foregroundColor(Theme.muted)
-                    TextField("8317", text: $portText)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 90)
-                        .monospacedDigit()
-                    Text("刷新间隔（分钟）").font(.system(size: 12.5)).foregroundColor(Theme.muted)
-                    TextField("30", text: $refreshText)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 60)
-                        .monospacedDigit()
-                    Button("保存并应用") { save() }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.accent)
-                    if saved {
-                        Text("已应用 ✓").font(.system(size: 11.5)).foregroundColor(Theme.ok)
-                    }
-                    Spacer(minLength: 0)
-                }
-                HStack(spacing: 10) {
-                    Button("打开配置文件") {
-                        NSWorkspace.shared.open(URL(fileURLWithPath: state.configPath))
-                    }
-                    .buttonStyle(.link)
-                    .font(.system(size: 11.5))
-                    Text(state.configPath).font(.system(size: 10.5)).foregroundColor(Theme.muted2).lineLimit(1)
-                    Spacer(minLength: 0)
-                }
-            }
-            Card(title: "服务状态") {
-                row("本机设备", state.collector.localHost)
-                row("监听端口", String(state.port))
-                row("数据记录", "\(Fmt.int(Double(state.snapshot.rows.count))) 条")
-                row("数据时间", Fmt.time(state.snapshot.lastSuccessAt ?? state.snapshot.fetchedAt))
-                row("采集状态", state.snapshot.refreshing
-                    ? "解析中…"
-                    : (state.snapshot.errors.isEmpty ? "正常" : "异常 ×\(state.snapshot.errors.count)"))
-                row("远端镜像", state.isMirrorRunning ? "同步中…" : "空闲（状态栏右键可手动触发）")
-            }
-            Card(title: "配置来源") {
-                row("配置文件", state.configPath)
-                row("实例 ID", state.instanceId)
-                row("设备根声明", "~/.config/wattson/devices.json")
-            }
-            Card(title: "数据口径") {
-                Text([
-                    "· Token 总量口径与成本计费一致：reasoning-in-output 提供商的推理 token 不重复计入",
-                    "· 成本按内嵌价目快照估算（未映射模型按 $0 计，可用 ~/.config/wattson/model-aliases.json 修正）",
-                    "· workbuddy 为会话级估算",
-                    "· 各区块共享同一份筛选（范围 + 维度钻取），口径一致",
-                ].joined(separator: "\n"))
-                .font(.system(size: 12))
-                .foregroundColor(Theme.muted)
-                .lineSpacing(4)
-            }
-        }
-        .onAppear {
-            if portText.isEmpty { portText = String(state.port) }
-            if refreshText.isEmpty { refreshText = String(Int(state.refreshMinutes)) }
-        }
-    }
-
-    private func save() {
-        guard let port = Int(portText), (1...65535).contains(port),
-              let refresh = Double(refreshText), refresh >= 1, refresh <= 24 * 60 else { return }
-        state.applySettings(port: port, refreshMinutes: refresh)
-        withAnimation { saved = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saved = false }
-    }
-
-    private func row(_ k: String, _ v: String) -> some View {
-        HStack(alignment: .top) {
-            Text(k).font(.system(size: 12.5)).foregroundColor(Theme.muted).frame(width: 76, alignment: .leading)
-            Text(v).font(.system(size: 12.5)).textSelection(.enabled)
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 2)
     }
 }

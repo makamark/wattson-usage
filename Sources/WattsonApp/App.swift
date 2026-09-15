@@ -22,12 +22,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     private var statusItem: NSStatusItem?
     private var popup: NSPopover?
     private var dashboardWindow: NSWindow?
+    private var settingsWindow: NSWindow?
     private var cancellable: AnyCancellable?
     private var lastPopupHideAt: TimeInterval = 0
     private var mirrorProcessRunning = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        appState.openSettingsHandler = { [weak self] in self?.openSettings() }
         setupStatusItem()
         cancellable = appState.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async {
@@ -129,10 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
     @objc private func menuOpenDashboard() { openDashboard() }
     @objc private func menuRefresh() { Task { await appState.refreshNow() } }
-    @objc private func menuOpenSettings() {
-        appState.showDashboardSettings = true
-        openDashboard()
-    }
+    @objc private func menuOpenSettings() { openSettings() }
     @objc private func menuSyncRemote() { appState.runMirrorNow() }
     @objc private func menuToggleLoginItem() { appState.toggleLoginItem() }
     @objc private func menuOpenLogFile() { appState.openLogFile() }
@@ -160,6 +159,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    // MARK: 设置窗口（独立窗口：主面板保持纯数据展示）
+
+    func openSettings() {
+        hidePopup()
+        if let win = settingsWindow {
+            win.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 420),
+                           styleMask: [.titled, .closable, .miniaturizable],
+                           backing: .buffered, defer: false)
+        win.title = "设置"
+        win.backgroundColor = Theme.nsBg
+        win.isReleasedWhenClosed = false
+        win.contentView = NSHostingView(rootView: SettingsView(state: appState))
+        win.center()
+        win.makeKeyAndOrderFront(nil)
+        settingsWindow = win
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     // MARK: NSPopoverDelegate / NSWindowDelegate
 
     func popoverDidClose(_ notification: Notification) {
@@ -168,8 +189,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     }
 
     func windowWillClose(_ notification: Notification) {
-        if let win = notification.object as? NSWindow, win == dashboardWindow {
-            dashboardWindow = nil
+        if let win = notification.object as? NSWindow {
+            if win == dashboardWindow { dashboardWindow = nil }
+            if win == settingsWindow { settingsWindow = nil }
         }
     }
 

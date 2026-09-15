@@ -18,8 +18,9 @@ final class AppState: ObservableObject {
     /// 看板全局筛选（web/src/state.ts filters，默认 30d × model × tokens）
     @Published var filters = DashboardFilters()
 
-    /// 主面板设置区显隐（顶栏齿轮 / 状态栏右键「设置…」控制）
-    @Published var showDashboardSettings = false
+    /// 打开设置窗口的回调（AppDelegate 注入；主面板齿轮与状态栏右键共用）
+    var openSettingsHandler: (() -> Void)?
+    func requestOpenSettings() { openSettingsHandler?() }
 
     let collector: Collector
     let poller: QuotaPoller
