@@ -96,6 +96,13 @@ let PRICING_SNAPSHOT: [String: SnapshotEntry] = [
     "deepseek-reasoner": SnapshotEntry(0.55e-6, 2.19e-6, nil, 0.14e-6, nil),
     "qwen3-coder": SnapshotEntry(0.22e-6, 0.88e-6, nil, 0.055e-6, nil),
     "qwen3-max": SnapshotEntry(1.2e-6, 6e-6, nil, 0.12e-6, nil),
+    // 真实语料补充（离线兜底；在线 LiteLLM 快照装载后覆盖更多）
+    "claude-opus-4-8": SnapshotEntry(5e-6, 25e-6, 6.25e-6, 0.5e-6, nil),
+    "gpt-5.6": SnapshotEntry(1.5e-6, 12e-6, nil, 0.15e-6, nil),
+    "gemini-3.7-flash": SnapshotEntry(0.5e-6, 3e-6, nil, 0.05e-6, nil),
+    "gemini-3.5-pro": SnapshotEntry(2e-6, 12e-6, nil, 0.2e-6, nil),
+    "deepseek-v4": SnapshotEntry(0.3e-6, 1.2e-6, nil, 0.03e-6, nil),
+    "deepseek-v4-flash": SnapshotEntry(0.15e-6, 0.6e-6, nil, 0.015e-6, nil),
     // Cursor（官方公布的自家模型价，缓存写 = 输入价）
     "composer-2.5": SnapshotEntry(0.5e-6, 2.5e-6, 0.5e-6, 0.2e-6, nil),
     "composer-2": SnapshotEntry(0.5e-6, 2.5e-6, 0.5e-6, 0.2e-6, nil),
@@ -116,6 +123,72 @@ func loadModelAliases() -> [String: String] {
     return out
 }
 
+// MARK: - 远程价目（LiteLLM 官方快照，24h 本地缓存）
+
+private let remoteLock = NSLock()
+private var remoteSnapshot: [String: SnapshotEntry] = [:]
+
+let LITELLM_PRICING_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+let PRICING_CACHE_TTL: TimeInterval = 24 * 3600
+
+private func pricingCachePath() -> String {
+    ((homePath() as NSString).appendingPathComponent("wattson/cache")) + "/litellm-prices.json"
+}
+
+/// 装载/刷新 LiteLLM 价目：缓存 24h 内直接用，否则拉取远端并回写缓存。
+/// 返回 true = 装载了新快照（调用方可触发一次重算）。
+@discardableResult
+public func refreshRemotePricing() async -> Bool {
+    let cacheFile = pricingCachePath()
+    if let attrs = try? FileManager.default.attributesOfItem(atPath: cacheFile),
+       let mtime = attrs[.modificationDate] as? Date,
+       Date().timeIntervalSince(mtime) < PRICING_CACHE_TTL,
+       !remoteSnapshotIsEmpty() {
+        return false  // 缓存新鲜且已装载
+    }
+    // 先试装载磁盘缓存（远端不可达时的离线兜底）
+    if remoteSnapshotIsEmpty(), let data = FileManager.default.contents(atPath: cacheFile) {
+        installRemoteSnapshot(data)
+    }
+    guard let url = URL(string: LITELLM_PRICING_URL),
+          let (data, resp) = try? await URLSession.shared.data(from: url),
+          (resp as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty else {
+        return false
+    }
+    try? FileManager.default.createDirectory(atPath: (cacheFile as NSString).deletingLastPathComponent,
+                                             withIntermediateDirectories: true)
+    try? data.write(to: URL(fileURLWithPath: cacheFile))
+    return installRemoteSnapshot(data)
+}
+
+private func remoteSnapshotIsEmpty() -> Bool {
+    remoteLock.lock(); defer { remoteLock.unlock() }
+    return remoteSnapshot.isEmpty
+}
+
+/// 解析 LiteLLM 快照（键形如 "gemini/gemini-2.5-pro"，取末段匹配）；返回是否有可用条目
+@discardableResult
+private func installRemoteSnapshot(_ data: Data) -> Bool {
+    guard let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+    var out: [String: SnapshotEntry] = [:]
+    for (rawKey, raw) in parsed {
+        // LiteLLM 键可带 provider 前缀（openai/、gemini/…），取最后一段做模型名
+        let key = rawKey.split(separator: "/").last.map(String.init) ?? rawKey
+        guard let obj = raw as? [String: Any] else { continue }
+        guard let input = obj["input_cost_per_token"] as? Double,
+              let output = obj["output_cost_per_token"] as? Double, input > 0 || output > 0 else { continue }
+        let cacheWrite = obj["cache_creation_input_token_cost"] as? Double
+        let cacheRead = obj["cache_read_input_token_cost"] as? Double
+        let fast = (obj["provider_specific_entry"] as? [String: Any])?["fast"] as? Double
+        out[key.lowercased()] = SnapshotEntry(input, output, cacheWrite, cacheRead, fast)
+    }
+    guard !out.isEmpty else { return false }
+    remoteLock.lock()
+    remoteSnapshot = out
+    remoteLock.unlock()
+    return true
+}
+
 /// 价目查询：精确 → 别名 → 去日期后缀 → 最长前缀（按 - 边界）
 public func getModelCosts(_ model: String) -> ModelCosts? {
     func entryToCosts(_ e: SnapshotEntry) -> ModelCosts {
@@ -129,15 +202,24 @@ public func getModelCosts(_ model: String) -> ModelCosts? {
         return nil
     }
     if let e = lookup(model) { return entryToCosts(e) }
+    // LiteLLM 远程快照（精确匹配；lowercased 键）
+    remoteLock.lock()
+    let remoteHit = remoteSnapshot[model.lowercased()]
+    remoteLock.unlock()
+    if let e = remoteHit { return entryToCosts(e) }
     // 别名（静态文件每次读取成本可接受：调用频率 = 每次 refresh 每行一次；
     // 行级重估时同一快照已带 costUSD 不会再进来）
     let aliases = loadModelAliases()
     if let target = aliases[model], let e = lookup(target) { return entryToCosts(e) }
-    // 去日期后缀（gpt-5.2-20260101 → gpt-5.2）
+    // 去日期后缀（gpt-5.2-20260101 → gpt-5.2）：先内嵌再远程
     var base = model.lowercased()
     if let r = base.range(of: #"-[0-9]{6,8}$"#, options: .regularExpression) {
         base = String(base[..<r.lowerBound])
         if let e = lookup(base) { return entryToCosts(e) }
+        remoteLock.lock()
+        let remoteBase = remoteSnapshot[base]
+        remoteLock.unlock()
+        if let e = remoteBase { return entryToCosts(e) }
     }
     // 最长前缀（按 - 边界）：glm-5.2-thinking → glm-5.2
     var candidates: [String] = []
@@ -151,6 +233,10 @@ public func getModelCosts(_ model: String) -> ModelCosts? {
     for c in candidates.reversed() {
         if let e = PRICING_SNAPSHOT[c] { return entryToCosts(e) }
     }
+    remoteLock.lock()
+    let remoteCandidates = candidates.compactMap { remoteSnapshot[$0] }
+    remoteLock.unlock()
+    if let e = remoteCandidates.first { return entryToCosts(e) }
     return nil
 }
 

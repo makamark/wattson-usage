@@ -407,10 +407,9 @@ struct SeriesChart: View {
     // MARK: 图例（点击开关系列）
 
     private var legend: some View {
-        // 原版 ECharts legend 为 type:'scroll' 横滚样式；chip 按内容自适应、完整显示系列名
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(allKeys, id: \.self) { key in
+        // 图例折行：chip 按内容自适应宽度，一行放不下自动换到第二行
+        FlowLegend(spacing: 6, lineSpacing: 5) {
+            ForEach(allKeys, id: \.self) { key in
                 Button {
                     if hiddenKeys.contains(key) {
                         hiddenKeys.remove(key)
@@ -436,11 +435,8 @@ struct SeriesChart: View {
                 }
                 .buttonStyle(.plain)
                 .help(hiddenKeys.contains(key) ? "显示 \(key)" : "隐藏 \(key)")
-                }
             }
-            .padding(.vertical, 1)
         }
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: 图表 + hover tooltip
@@ -680,18 +676,21 @@ struct PlanCard: View {
                 .font(.system(size: 11.5)).foregroundColor(Theme.muted)
                 .frame(width: 60, alignment: .leading).lineLimit(1)
             quotaBar(fraction: remainPct / 100, color: barColor)
-                .frame(minWidth: 40)
-            HStack(spacing: 4) {
+                .frame(minWidth: 48)
+            VStack(alignment: .trailing, spacing: 1) {
                 Text(nums).monospacedDigit()
-                if !reset.isEmpty {
-                    Image(systemName: "clock").font(.system(size: 9))
-                    Text(reset)
+                    .font(.system(size: 10.5, weight: remainPct <= 30 ? .semibold : .regular))
+                    .foregroundStyle(remainPct <= 30 ? Theme.err : Theme.muted)
+                    .fixedSize(horizontal: true, vertical: false)
+                HStack(spacing: 3) {
+                    Image(systemName: "clock").font(.system(size: 8.5))
+                    Text(reset.isEmpty ? " " : reset)  // 空占位保持两行基线对齐
                 }
+                .font(.system(size: 9.5))
+                .foregroundStyle(Theme.muted2)
+                .fixedSize(horizontal: true, vertical: false)
             }
-            .font(.system(size: 10.5, weight: remainPct <= 30 ? .semibold : .regular))
-            .foregroundColor(remainPct <= 30 ? Theme.err : Theme.muted)
-            .fixedSize(horizontal: true, vertical: false)
-            .frame(minWidth: 168, alignment: .trailing)  // 数字列定宽对齐：多行进度条终点一致
+            .frame(alignment: .trailing)
         }
         .padding(.vertical, 3)
     }
@@ -828,5 +827,46 @@ private struct ModelsSection: View {
                 }
             }
         }
+    }
+}
+
+/// 流式折行图例（Layout 协议）：子项按内容自适应宽度，超行自动折到下一行
+private struct FlowLegend: Layout {
+    var spacing: CGFloat
+    var lineSpacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(proposal.width ?? 320, subviews: subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let lines = arrange(bounds.width, subviews: subviews).lines
+        for (li, line) in lines.enumerated() {
+            for (si, size) in line {
+                subviews[si].place(at: CGPoint(x: 0, y: CGFloat(li) * (lineHeight + lineSpacing)),
+                                   anchor: .topLeading, proposal: ProposedViewSize(size))
+            }
+        }
+    }
+
+    private var lineHeight: CGFloat { 22 }
+
+    private func arrange(_ maxWidth: CGFloat, subviews: Subviews) -> (lines: [[Int: CGSize]], size: CGSize) {
+        var lines: [[Int: CGSize]] = [[Int: CGSize]()]
+        var x: CGFloat = 0
+        var widths: [CGFloat] = [0]
+        for (i, subview) in subviews.enumerated() {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > maxWidth {
+                lines.append([Int: CGSize]())
+                widths.append(0)
+                x = 0
+            }
+            lines[lines.count - 1][i] = size
+            x += (x > 0 ? spacing : 0) + size.width
+            widths[widths.count - 1] = x
+        }
+        let height = CGFloat(lines.count) * lineHeight + CGFloat(max(0, lines.count - 1)) * lineSpacing
+        return (lines, CGSize(width: max(widths.max() ?? 0, 1), height: height))
     }
 }

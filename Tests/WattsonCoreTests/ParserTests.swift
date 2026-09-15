@@ -83,6 +83,33 @@ final class ParserTests: XCTestCase {
         XCTAssertGreaterThan(r.cost ?? 0, 0)
     }
 
+    /// 回归：真实 rollout 的 payload.model 只在会话开头出现（用量行在后），
+    /// 解析器必须跨行保留模型名，否则整批用量落成 unknown（曾致 4.28B tokens 无价）
+    func testCodexRolloutKeepsModelFromSessionHeaderLine() async {
+        let home = makeTempDir(prefix: "scan-")
+        let events: [String] = [
+            JSON.fromAny([
+                "timestamp": "2026-09-10T01:00:00.000Z", "session_id": "c2",
+                "payload": ["type": "session_meta", "cwd": "/Users/x/app", "model_provider": "openai", "model": "gpt-5.5"],
+            ]).encodedString(),
+            JSON.fromAny([
+                "timestamp": "2026-09-10T01:05:00.000Z",
+                "payload": ["type": "token_count",
+                            "info": ["total_token_usage": ["input_tokens": 100, "cached_input_tokens": 20,
+                                                           "output_tokens": 10, "reasoning_output_tokens": 2]]],
+            ]).encodedString(),
+        ]
+        writeFixture((home as NSString).appendingPathComponent(".codex/sessions/2026/09/10/rollout-b.jsonl"),
+                     events.joined(separator: "\n"))
+        let cache = await scanAllSources(home: home, devices: [], run: failingRun)
+        let rows = rowsFromCache(cache, [], "macair")
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].model, "gpt-5.5")   // 不是 unknown
+        XCTAssertEqual(rows[0].project, "/Users/x/app")
+        XCTAssertEqual(rows[0].tout, 10)
+        XCTAssertEqual(rows[0].treason, 2)
+    }
+
     // MARK: zcode（SQLite 投影，经系统 sqlite3）
 
     func testZcodeSqliteScanSkipsZeroRowsAndSplitsCachedInput() async throws {

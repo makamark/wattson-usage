@@ -40,16 +40,21 @@ enum Theme {
     static let warn = dynamic(0xc98a1e, 0xe0a458)
     static let err = dynamic(0xd95a48, 0xe5735c)
 
-    /// 主图系列配色（mainchart.ts PALETTE；浅色取加深变体保证白底可读）
+    /// 主图系列配色（重调版）：品牌绿领衔、色相环均匀分布、低饱和高级感；
+    /// 浅色用深化变体（白底可读），深色用提亮变体（炭底柔和），共 12 色减少长系列重复
     static let palette: [Color] = [
-        dynamicColor(rgb(0x3f8a76), rgb(0x57a48f)),
-        dynamicColor(rgb(0xb99f4e), rgb(0xd9c589)),
-        dynamicColor(rgb(0xa8603f), rgb(0xc97b5d)),
-        dynamicColor(rgb(0x5f7f92), rgb(0x7f98a8)),
-        dynamicColor(rgb(0x6f8c52), rgb(0x8fa76f)),
-        dynamicColor(rgb(0xb0783a), rgb(0xe0a458)),
-        dynamicColor(rgb(0x4f8b83), rgb(0x6fa8a0)),
-        dynamicColor(rgb(0x8f968a), rgb(0xb9c0ae)),
+        dynamicColor(rgb(0x2e7d6a), rgb(0x57a48f)),  // 品牌深绿
+        dynamicColor(rgb(0xc08a3e), rgb(0xd9c589)),  // 琥珀
+        dynamicColor(rgb(0xa85f54), rgb(0xc97b5d)),  // 赤陶
+        dynamicColor(rgb(0x56789b), rgb(0x7f98a8)),  // 钢蓝
+        dynamicColor(rgb(0x71865b), rgb(0x8fa76f)),  // 橄榄
+        dynamicColor(rgb(0x9a6e9e), rgb(0xb49ac2)),  // 紫藤
+        dynamicColor(rgb(0x4e8a9e), rgb(0x6fb0c0)),  // 青
+        dynamicColor(rgb(0x8b8474), rgb(0xb9c0ae)),  // 暖灰绿
+        dynamicColor(rgb(0xb06a71), rgb(0xd98891)),  // 玫瑰
+        dynamicColor(rgb(0x5d7a5a), rgb(0x93b58c)),  // 苔绿
+        dynamicColor(rgb(0x937f4e), rgb(0xcdb37a)),  // 金褐
+        dynamicColor(rgb(0x6b7f9e), rgb(0x8fa5c4)),  // 雾蓝
     ]
 
     /// 卡片环境阴影（浅色=柔和弥散、深色=更深沉）；替代生硬灰边框的层级表达

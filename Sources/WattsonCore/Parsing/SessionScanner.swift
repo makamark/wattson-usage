@@ -186,16 +186,25 @@ func parseCodexRollout(_ path: String) -> CachedFile? {
     var sessionId: String?
     let mTokenCount = Data("\"token_count\"".utf8)
     let mSessionMeta = Data("\"session_meta\"".utf8)
-    // 预过滤：只解析 token_count（用量）与 session_meta（元数据）行，跳过其余绝大多数事件
+    let mModel = Data("\"model\"".utf8)
+    let mCwd = Data("\"cwd\"".utf8)
+    // 预过滤分两档：token_count（用量）/ session_meta（会话元数据）/ 含 model|cwd 的元数据行。
+    // 真实 rollout 的 payload.model（如 gpt-5.5）只在会话开头出现，必须一并捕获，
+    // 否则用量行无法归属到模型（曾整批落成 unknown）。
     forEachLine(raw) { line in
         let isTokenCount = line.range(of: mTokenCount) != nil
         let isSessionMeta = line.range(of: mSessionMeta) != nil
-        guard isTokenCount || isSessionMeta else { return }
+        let maybeMeta = line.range(of: mModel) != nil || line.range(of: mCwd) != nil
+        guard isTokenCount || isSessionMeta || maybeMeta else { return }
         guard let entry = try? JSON.parse(line) else { return }
         if let sid = entry["session_id"]?.str { sessionId = sid }
-        if let cwd = entry["payload"]?["cwd"]?.str ?? entry["cwd"]?.str { project = cwd }
-        if let m = entry["payload"]?["model"]?.str ?? entry["payload"]?["model_id"]?.str
-            ?? entry["payload"]?["info"]?["model_id"]?.str { model = m }
+        let payload = entry["payload"]
+        if let cwd = payload?["cwd"]?.str ?? entry["cwd"]?.str { project = cwd }
+        // 模型名：payload.model（标准）→ 其它历史/变体字段
+        if let m = payload?["model"]?.str ?? payload?["model_id"]?.str
+            ?? payload?["info"]?["model_id"]?.str
+            ?? payload?["collaboration_mode"]?["settings"]?["model"]?.str
+            ?? entry["model"]?.str { model = m }
         guard isTokenCount else { return }
         // 形状一：token_count 事件 payload.info.total_token_usage（累计值）
         var total: JSON? = entry["payload"]?["info"]?["total_token_usage"]

@@ -178,6 +178,13 @@ final class AppState: ObservableObject {
         }
 
         Task { await refreshNow() }
+        // LiteLLM 价目后台刷新（24h 缓存）；装载新快照后重算成本（未收录模型从 $0 恢复）
+        Task.detached(priority: .utility) {
+            let loaded = await refreshRemotePricing()
+            if loaded {
+                await MainActor.run { Task { await self.refreshNow() } }
+            }
+        }
         scheduleQuotaPoll()
         scheduleRefresh()
     }
