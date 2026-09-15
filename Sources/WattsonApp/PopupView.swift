@@ -89,6 +89,13 @@ struct PopupView: View {
             if state.snapshot.refreshing {
                 chip(text: "解析中…", live: true)
             }
+            if state.isMirrorRunning {
+                chip(text: "同步中…", live: true)
+            }
+            if state.serverError != nil {
+                chip(text: "API 服务未启动", live: false)
+                    .help(state.serverError ?? "")
+            }
         }
     }
 
@@ -106,9 +113,19 @@ struct PopupView: View {
     // MARK: 主体
 
     private var placeholder: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             Text("暂无用量数据").font(.system(size: 15, weight: .medium))
             Text("本机 AI 工具产生用量后自动出现").font(.caption).foregroundColor(Theme.muted)
+            if state.remoteDevices.isEmpty {
+                Button {
+                    state.requestOpenSettings(.devices)
+                } label: {
+                    Text("添加远端设备，汇总多机用量")
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 12))
+                .padding(.top, 4)
+            }
         }
         .foregroundColor(Theme.text)
         .frame(maxWidth: .infinity)

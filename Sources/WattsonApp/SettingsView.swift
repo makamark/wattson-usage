@@ -3,27 +3,48 @@
 import SwiftUI
 import WattsonCore
 
+/// 设置分页标识（外部入口可指定打开后定位到哪页）
+enum SettingsPage: String, Hashable {
+    case general, devices, diagnostics, semantics, about
+}
+
 struct SettingsView: View {
     @ObservedObject var state: AppState
+    var initialPage: SettingsPage = .general
 
     var body: some View {
-        NavigationSplitView {
-            List(selection: $selected) {
-                Label("通用", systemImage: "gearshape").tag(Page.general)
-                Label("服务状态", systemImage: "stethoscope").tag(Page.diagnostics)
-                Label("数据口径", systemImage: "ruler").tag(Page.semantics)
-                Label("关于", systemImage: "info.circle").tag(Page.about)
+        // 自定义侧栏：List(selection:) 在 macOS 会覆盖初始选中页（SwiftUI 已知行为）
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(SettingsPage.allCases) { page in
+                    Button {
+                        selected = page
+                    } label: {
+                        Label(page.title, systemImage: page.icon)
+                            .font(.system(size: 13))
+                            .foregroundStyle(selected == page ? Theme.text : Theme.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 10)
+                            .background(RoundedRectangle(cornerRadius: 7)
+                                .fill(selected == page ? Theme.accentSoft : Color.clear))
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer()
             }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(168)
-        } detail: {
+            .padding(10)
+            .frame(width: 168, alignment: .topLeading)
+            .background(Theme.bgSoft)
+            .overlay(Divider().overlay(Theme.border), alignment: .trailing)
+
             Group {
                 switch selected {
                 case .general: GeneralPage(state: state)
+                case .devices: DevicesPage(state: state)
                 case .diagnostics: DiagnosticsPage(state: state)
                 case .semantics: SemanticsPage()
                 case .about: AboutPage(state: state)
-                case nil: GeneralPage(state: state)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -33,11 +54,37 @@ struct SettingsView: View {
         .preferredColorScheme(nil)
     }
 
-    private enum Page: Hashable {
-        case general, diagnostics, semantics, about
+    @State private var selected: SettingsPage
+
+    init(state: AppState, initialPage: SettingsPage = .general) {
+        self.state = state
+        self.initialPage = initialPage
+        _selected = State(initialValue: initialPage)
+    }
+}
+
+extension SettingsPage: CaseIterable, Identifiable {
+    public var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: return "通用"
+        case .devices: return "设备"
+        case .diagnostics: return "服务状态"
+        case .semantics: return "数据口径"
+        case .about: return "关于"
+        }
     }
 
-    @State private var selected: Page? = .general
+    var icon: String {
+        switch self {
+        case .general: return "gearshape"
+        case .devices: return "desktopcomputer.and.arrow.down"
+        case .diagnostics: return "stethoscope"
+        case .semantics: return "ruler"
+        case .about: return "info.circle"
+        }
+    }
 }
 
 // MARK: - 通用（可修改的设置）
@@ -106,6 +153,157 @@ private struct GeneralPage: View {
     }
 }
 
+// MARK: - 设备（多机管理：本机 + 远端 SSH 镜像）
+
+private struct DevicesPage: View {
+    @ObservedObject var state: AppState
+    @State private var sshText = ""
+    @State private var nameText = ""
+    @State private var devices: [AppState.RemoteDevice] = []
+    @State private var saved = false
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("本机") {
+                    Label(state.collector.localHost, systemImage: "desktopcomputer")
+                }
+                .help("本机数据源自动发现，零配置")
+            } header: {
+                Text("本机（自动发现）")
+            } footer: {
+                Text("本机会自动扫描 claude / codex / zcode / workbuddy 的本机数据目录，无需配置。")
+            }
+
+            Section {
+                if devices.isEmpty {
+                    Text("暂无远端设备").foregroundStyle(.secondary)
+                }
+                ForEach(devices) { d in
+                    HStack {
+                        Image(systemName: "server.rack")
+                            .foregroundStyle(Theme.accent)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(d.name).font(.system(size: 12.5, weight: .medium))
+                            Text(d.ssh).font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(role: .destructive) {
+                            devices.removeAll { $0.id == d.id }
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            } header: {
+                Text("远端设备（SSH 镜像）")
+            } footer: {
+                Text("远端机器只需系统自带 ssh + rsync + sqlite3，免密可达即可；数据快照镜像到本机，远端零常驻。")
+            }
+
+            Section {
+                LabeledContent("SSH 目标") {
+                    TextField("别名（如 workstation）或 user@host", text: $sshText)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit(probe)
+                }
+                LabeledContent("设备名") {
+                    TextField("看板展示名（默认取 SSH 目标）", text: $nameText)
+                        .textFieldStyle(.roundedBorder)
+                }
+                LabeledContent("") {
+                    HStack(spacing: 10) {
+                        Button("探测") { probe() }
+                            .disabled(sshText.trimmingCharacters(in: .whitespaces).isEmpty || state.sshProbe.running)
+                        if state.sshProbe.running {
+                            ProgressView().controlSize(.small)
+                            Text("探测中…").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if state.sshProbe.done {
+                    probeResult
+                }
+                LabeledContent("") {
+                    HStack(spacing: 10) {
+                        Button("添加设备") { add() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.accent)
+                            .disabled(!state.sshProbe.ok || devices.contains { $0.ssh == sshText.trimmingCharacters(in: .whitespaces) })
+                        Spacer()
+                        Button("保存并生成映射") { save() }
+                            .disabled(devices == state.remoteDevices && !devicesAdded)
+                        if saved {
+                            Text("已保存").font(.caption).foregroundStyle(Theme.ok)
+                        }
+                    }
+                }
+            } header: {
+                Text("添加远端设备")
+            } footer: {
+                Text("先探测验证 SSH 可达性与远端数据源，再添加。保存后可在状态栏右键「立即同步远端」执行首轮镜像。")
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear {
+            state.loadDevices()
+            if devices.isEmpty { devices = state.remoteDevices }
+        }
+    }
+
+    @State private var devicesAdded = false
+
+    @ViewBuilder private var probeResult: some View {
+        if state.sshProbe.ok {
+            LabeledContent("探测结果") {
+                VStack(alignment: .leading, spacing: 2) {
+                    if !state.sshProbe.tools.isEmpty {
+                        Label("数据源：\(state.sshProbe.tools.joined(separator: "、"))", systemImage: "checkmark.circle")
+                            .foregroundStyle(Theme.ok)
+                    } else {
+                        Text("可达，但未发现数据源").foregroundStyle(.secondary)
+                    }
+                    ForEach(state.sshProbe.missing, id: \.self) { m in
+                        Label("远端缺少 \(m)", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(Theme.warn)
+                    }
+                }
+            }
+        } else if let err = state.sshProbe.error {
+            LabeledContent("探测结果") {
+                Label(err, systemImage: "xmark.circle").foregroundStyle(Theme.err)
+            }
+        }
+    }
+
+    private func probe() {
+        let dest = sshText.trimmingCharacters(in: .whitespaces)
+        guard !dest.isEmpty else { return }
+        state.probeSsh(dest: dest)
+    }
+
+    private func add() {
+        let dest = sshText.trimmingCharacters(in: .whitespaces)
+        let name = nameText.trimmingCharacters(in: .whitespaces)
+        devices.append(AppState.RemoteDevice(name: name.isEmpty ? dest : name, ssh: dest))
+        devicesAdded = true
+        sshText = ""
+        nameText = ""
+        state.sshProbe = AppState.SshProbe()
+    }
+
+    private func save() {
+        state.saveDevices(devices)
+        devicesAdded = false
+        withAnimation { saved = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saved = false }
+        // 原向导链路：保存 → 派生映射 → 首轮同步（有远端设备时）
+        if !devices.isEmpty { state.runMirrorNow() }
+    }
+}
+
 // MARK: - 服务状态（只读诊断）
 
 private struct DiagnosticsPage: View {
@@ -122,7 +320,11 @@ private struct DiagnosticsPage: View {
                     : (state.snapshot.errors.isEmpty ? "正常" : "异常 ×\(state.snapshot.errors.count)"))
             }
             Section("网络") {
-                row("监听端口", String(state.port))
+                if let err = state.serverError {
+                    row("监听端口", "启动失败：\(err)")
+                } else {
+                    row("监听端口", "127.0.0.1:\(state.port)")
+                }
                 row("额度出网代理", state.proxyNote ?? "直连")
             }
             if !state.snapshot.errors.isEmpty {

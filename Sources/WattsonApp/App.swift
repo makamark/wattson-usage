@@ -29,7 +29,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        appState.openSettingsHandler = { [weak self] in self?.openSettings() }
+        appState.openSettingsHandler = { [weak self] page in self?.openSettings(page) }
+        appState.loadDevices()  // 启动即读远端设备列表（popup 初始化入口 / 镜像入口依据）
         setupStatusItem()
         cancellable = appState.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async {
@@ -131,7 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
     @objc private func menuOpenDashboard() { openDashboard() }
     @objc private func menuRefresh() { Task { await appState.refreshNow() } }
-    @objc private func menuOpenSettings() { openSettings() }
+    @objc private func menuOpenSettings() { openSettings(.devices) }
     @objc private func menuSyncRemote() { appState.runMirrorNow() }
     @objc private func menuToggleLoginItem() { appState.toggleLoginItem() }
     @objc private func menuOpenLogFile() { appState.openLogFile() }
@@ -161,7 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
     // MARK: 设置窗口（独立窗口：主面板保持纯数据展示）
 
-    func openSettings() {
+    func openSettings(_ page: SettingsPage? = nil) {
         hidePopup()
         if let win = settingsWindow {
             win.makeKeyAndOrderFront(nil)
@@ -174,7 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         win.title = "设置"
         win.backgroundColor = Theme.nsBg
         win.isReleasedWhenClosed = false
-        win.contentView = NSHostingView(rootView: SettingsView(state: appState))
+        win.contentView = NSHostingView(rootView: SettingsView(state: appState, initialPage: page ?? .general))
         win.center()
         win.makeKeyAndOrderFront(nil)
         settingsWindow = win
