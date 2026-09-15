@@ -486,22 +486,25 @@ struct SeriesChart: View {
 
     private var chart: some View {
         let labels = bucketLabels
+        let keys = visibleKeys
         return Chart {
-            // 占位柱（0 高、透明）：让每个时间桶都成为类目——
-            // 空桶也占位、类目顺序即时间顺序（原 ECharts category 轴语义）
-            ForEach(labels.indices, id: \.self) { i in
-                BarMark(x: .value("时间", labels[i]), y: .value(metric.label, 0))
-                    .foregroundStyle(.clear)
-            }
             ForEach(bars) { bar in
                 BarMark(
                     x: .value("时间", bar.label),
                     y: .value(metric.label, bar.value)
                 )
-                .foregroundStyle(color(bar.key))
+                // foregroundStyle(by:) 同时是「按系列堆叠」的信号：
+                // 换成 foregroundStyle(color:) 会让同类目内的柱子被并排分组，
+                // 每根只占日带的一个子槽 → 偏离标签中心（错位根因）
+                .foregroundStyle(by: .value("系列", bar.key))
                 .cornerRadius(2)
             }
         }
+        // 系列配色（与自定义图例同序同色）；隐藏 Swift Charts 自带图例
+        .chartForegroundStyleScale(domain: keys, range: keys.map(color))
+        .chartLegend(.hidden)
+        // 类目域显式声明：空桶也占位、顺序即时间顺序
+        .chartXScale(domain: labels)
         .chartYAxis {
             AxisMarks(position: .leading, values: .automatic(desiredCount: 5)) { axis in
                 AxisGridLine().foregroundStyle(Theme.borderStrong)
