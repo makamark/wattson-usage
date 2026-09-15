@@ -13,7 +13,8 @@ let package = Package(
         .executableTarget(
             name: "WattsonApp",
             dependencies: ["WattsonCore"],
-            path: "Sources/WattsonApp"
+            path: "Sources/WattsonApp",
+            resources: [.copy("Resources")]
         ),
         // 无头 API 服务器（launchd 常驻 / 远端中心机部署）
         .executableTarget(

@@ -12,6 +12,10 @@ final class AppState: ObservableObject {
     @Published private(set) var quota = QuotaSnapshot(accounts: [])
     @Published private(set) var refreshing = false
     @Published private(set) var proxyNote: String?
+    /// 状态栏小窗的统计范围（popup.html sel-range，默认 24h）
+    @Published var popupRange: RangeOption = .h24
+    /// 看板全局筛选（web/src/state.ts filters，默认 30d × model × tokens）
+    @Published var filters = DashboardFilters()
 
     let collector: Collector
     let poller: QuotaPoller
@@ -21,6 +25,7 @@ final class AppState: ObservableObject {
     let port: Int
     let refreshMinutes: Double
     let configPath: String
+    let instanceId = UUID().uuidString
 
     var menuTitle: String {
         let tokens = snapshot.rows
@@ -51,7 +56,6 @@ final class AppState: ObservableObject {
 
         let c = collector
         let p = poller
-        let instanceId = UUID().uuidString
         let cfg = configPath
         let serverPort = port
         let trigger: () -> Void = { Task { _ = await c.refresh(); _ = await p.current() } }
