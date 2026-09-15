@@ -76,10 +76,6 @@ final class AppState: ObservableObject {
         quota = await poller.current()
     }
 
-    func openDashboard() {
-        NSWorkspace.shared.open(URL(string: "wattson://dashboard")!)
-    }
-
     private func scheduleQuotaPoll() {
         Task { await pollQuotaNow() }
         let t = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in

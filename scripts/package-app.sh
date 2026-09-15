@@ -12,7 +12,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-VERSION="${1:-2.0.0}"
+VERSION="${1:-2.0.1}"
 PRODUCT="WattsonNative"
 APP_ID="com.wattson.native"
 ARCH="$(uname -m)"
@@ -34,16 +34,22 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/$PRODUCT"
 
-echo "[3/5] 生成图标（icns）"
-ICONSET="$OUT/$PRODUCT.iconset"
-rm -rf "$ICONSET"; mkdir -p "$ICONSET"
-for s in 16 32 128 256 512; do
-  d=$((s * 2))
-  sips -z "$s" "$s" docs/logo.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-  sips -z "$d" "$d" docs/logo.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
-done
-iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
-rm -rf "$ICONSET"
+echo "[3/5] 应用图标"
+# 最新图标：assets/icon.icns（原工程最新应用图标，含 trayTemplate 未用）；
+# 缺失时回退用 docs/logo.png 现生成
+if [ -f assets/icon.icns ]; then
+  cp assets/icon.icns "$APP/Contents/Resources/AppIcon.icns"
+else
+  ICONSET="$OUT/$PRODUCT.iconset"
+  rm -rf "$ICONSET"; mkdir -p "$ICONSET"
+  for s in 16 32 128 256 512; do
+    d=$((s * 2))
+    sips -z "$s" "$s" docs/logo.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
+    sips -z "$d" "$d" docs/logo.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+  rm -rf "$ICONSET"
+fi
 
 echo "[4/5] 写 Info.plist + 签名"
 PLIST_VERSION="$VERSION" PLIST_APP_ID="$APP_ID" PLIST_PRODUCT="$PRODUCT" \

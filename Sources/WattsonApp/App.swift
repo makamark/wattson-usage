@@ -6,10 +6,14 @@ import SwiftUI
 struct WattsonAppMain: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var appState = AppState()
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         MenuBarExtra(appState.menuTitle, isInserted: .constant(true)) {
-            Button("打开看板") { appState.openDashboard() }
+            Button("打开看板") {
+                openWindow(id: "dashboard")
+                NSApp.activate(ignoringOtherApps: true)
+            }
             Button(appState.refreshing ? "采集中…" : "立即刷新") {
                 Task { await appState.refreshNow() }
             }
