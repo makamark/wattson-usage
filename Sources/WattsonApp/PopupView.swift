@@ -274,14 +274,31 @@ struct PopupView: View {
         let byTool = state.breakdown(data.main.byTool)
         let byHost = state.breakdown(data.main.byHost)
         if !byTool.isEmpty || !byHost.isEmpty {
-            DisclosureGroup(isExpanded: $detailOpen) {
-                breakdown("按工具", byTool)
-                breakdown("按设备", byHost)
-            } label: {
-                Text("明细")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(Theme.muted)
-                    .kerning(0.9)
+            // 整行可点（原版 <details> 语义：点「明细」文字/箭头/行内任意位置都展开）
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { detailOpen.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("明细")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(Theme.muted)
+                            .kerning(0.9)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(Theme.muted2)
+                            .rotationEffect(.degrees(detailOpen ? 90 : 0))
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .padding(.vertical, 7)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(detailOpen ? "收起明细" : "展开明细")
+                if detailOpen {
+                    breakdown("按工具", byTool)
+                    breakdown("按设备", byHost)
+                }
             }
             .padding(.top, 12)
         }
