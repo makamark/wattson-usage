@@ -411,8 +411,10 @@ struct SeriesChart: View {
     // MARK: 图例（点击开关系列）
 
     private var legend: some View {
-        FlexibleHStack(spacing: 6, lineSpacing: 4) {
-            ForEach(allKeys, id: \.self) { key in
+        // 原版 ECharts legend 为 type:'scroll' 横滚样式；chip 按内容自适应、完整显示系列名
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(allKeys, id: \.self) { key in
                 Button {
                     if hiddenKeys.contains(key) {
                         hiddenKeys.remove(key)
@@ -429,7 +431,7 @@ struct SeriesChart: View {
                         Text(key)
                             .font(.system(size: 11))
                             .foregroundStyle(hiddenKeys.contains(key) ? Theme.muted2 : Theme.muted)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)  // 完整显示，由 FlowLayout 折行
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 2)
@@ -438,8 +440,11 @@ struct SeriesChart: View {
                 }
                 .buttonStyle(.plain)
                 .help(hiddenKeys.contains(key) ? "显示 \(key)" : "隐藏 \(key)")
+                }
             }
+            .padding(.vertical, 1)
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: 图表 + hover tooltip
@@ -520,7 +525,7 @@ struct SeriesChart: View {
         }
     }
 
-    private var tooltipWidth: CGFloat { 240 }
+    private var tooltipWidth: CGFloat { 300 }
     private var tooltipHeight: CGFloat {
         CGFloat(min(hoverRows.count, 9) * 20 + 52)
     }
@@ -595,21 +600,6 @@ struct SeriesChart: View {
             hoverX = x
         } else {
             hoverX = location.x
-        }
-    }
-}
-
-/// 简易换行 HStack（图例条超出宽度自动折行）
-private struct FlexibleHStack<Content: View>: View {
-    var spacing: CGFloat
-    var lineSpacing: CGFloat
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        // LazyVGrid 自适应列近似折行：以最小宽度估算列数
-        let columns = [GridItem(.adaptive(minimum: 92), alignment: .leading)]
-        LazyVGrid(columns: columns, alignment: .leading, spacing: lineSpacing) {
-            content
         }
     }
 }
@@ -710,8 +700,8 @@ struct PlanCard: View {
             }
             .font(.system(size: 10.5, weight: remainPct <= 30 ? .semibold : .regular))
             .foregroundColor(remainPct <= 30 ? Theme.err : Theme.muted)
+            .fixedSize(horizontal: true, vertical: false)  // 完整显示「剩 N% · N/N · 倒计时」
             .frame(alignment: .trailing)
-            .lineLimit(1)
         }
         .padding(.vertical, 2)
     }

@@ -273,12 +273,13 @@ struct PopupView: View {
                 }
             }
             .frame(height: 6)
+            .frame(minWidth: 36)  // 进度条让位：数字区加宽后仍保留最短可视长度
             Text(nums)
                 .font(.system(size: 10.5, weight: remainPct <= 30 ? .semibold : .regular))
                 .foregroundColor(remainPct <= 30 ? Theme.err : Theme.muted)
                 .monospacedDigit()
-                .frame(width: 92, alignment: .trailing)
-                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)  // 完整显示「剩 N% · 倒计时」
+                .frame(minWidth: 118, alignment: .trailing)
         }
         .padding(.vertical, 2)
     }
