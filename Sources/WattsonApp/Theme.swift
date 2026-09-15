@@ -1,37 +1,63 @@
-// Theme.swift — 炭黑仪表风主题（与原 web/src/style.css / popup 同源设计语言）
+// Theme.swift — Wattson 主题：跟随系统外观的动态配色（浅色 Apple 风 / 深色炭黑仪表风）
 // 与格式化工具（与 web/src/format.ts 同口径）。
+// 浅色 = Apple 风（白卡 + 灰底 + 品牌电表绿原始值 #447E72）；
+// 深色 = 原 web/src/style.css 的炭黑仪表风（accent 提亮为 #57a48f）。
 import SwiftUI
 import WattsonCore
 
-enum Theme {
-    static let bg = Color(red: 0x14/255, green: 0x18/255, blue: 0x1a/255)
-    static let bgSoft = Color(red: 0x19/255, green: 0x1e/255, blue: 0x20/255)
-    static let panel = Color(red: 0x22/255, green: 0x28/255, blue: 0x2a/255)
-    static let panel2 = Color(red: 0x2a/255, green: 0x31/255, blue: 0x34/255)
-    static let panel3 = Color(red: 0x33/255, green: 0x3b/255, blue: 0x3e/255)
-    static let border = Color.white.opacity(0.07)
-    static let borderStrong = Color.white.opacity(0.14)
-    static let text = Color(red: 0xec/255, green: 0xe9/255, blue: 0xdf/255)
-    static let muted = Color(red: 0xa3/255, green: 0xac/255, blue: 0xa6/255)
-    static let muted2 = Color(red: 0x7d/255, green: 0x87/255, blue: 0x81/255)
-    /// 电表绿（暗底提亮）
-    static let accent = Color(red: 0x57/255, green: 0xa4/255, blue: 0x8f/255)
-    static let accentSoft = Color.accentColor.opacity(0.16)
-    static let ok = Color(red: 0x4c/255, green: 0xc3/255, blue: 0x8a/255)
-    static let warn = Color(red: 0xe0/255, green: 0xa4/255, blue: 0x58/255)
-    static let err = Color(red: 0xe5/255, green: 0x73/255, blue: 0x5c/255)
+private func dynamicColor(_ light: NSColor, _ dark: NSColor) -> Color {
+    Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+    })
+}
 
-    /// 主图系列配色（mainchart.ts PALETTE）
+private func rgb(_ hex: UInt32) -> NSColor {
+    NSColor(srgbRed: CGFloat((hex >> 16) & 0xff) / 255,
+            green: CGFloat((hex >> 8) & 0xff) / 255,
+            blue: CGFloat(hex & 0xff) / 255, alpha: 1)
+}
+
+enum Theme {
+    static func dynamic(_ light: UInt32, _ dark: UInt32) -> Color {
+        dynamicColor(rgb(light), rgb(dark))
+    }
+
+    static let bg = dynamic(0xf5f5f7, 0x14181a)
+    static let bgSoft = dynamic(0xeeeeef, 0x191e20)
+    static let panel = dynamic(0xffffff, 0x22282a)
+    static let panel2 = dynamic(0xf0f0f2, 0x2a3134)
+    static let panel3 = dynamic(0xe5e5e7, 0x333b3e)
+    static var border: Color { dynamicColor(NSColor.black.withAlphaComponent(0.08), NSColor.white.withAlphaComponent(0.07)) }
+    static var borderStrong: Color { dynamicColor(NSColor.black.withAlphaComponent(0.15), NSColor.white.withAlphaComponent(0.14)) }
+
+    static let text = dynamic(0x1d1d1f, 0xece9df)
+    static let muted = dynamic(0x6e6e73, 0xa3aca6)
+    static let muted2 = dynamic(0xaeaeb2, 0x7d8781)
+    /// 电表绿：浅色用品牌原始 #447E72，深色提亮 #57a48f
+    static let accent = dynamic(0x447e72, 0x57a48f)
+    static let accentSoft = accent.opacity(0.14)
+    static let ok = dynamic(0x34a853, 0x4cc38a)
+    static let warn = dynamic(0xc98a1e, 0xe0a458)
+    static let err = dynamic(0xd95a48, 0xe5735c)
+
+    /// 主图系列配色（mainchart.ts PALETTE；浅色取加深变体保证白底可读）
     static let palette: [Color] = [
-        Color(red: 0x57/255, green: 0xa4/255, blue: 0x8f/255),
-        Color(red: 0xd9/255, green: 0xc5/255, blue: 0x89/255),
-        Color(red: 0xc9/255, green: 0x7b/255, blue: 0x5d/255),
-        Color(red: 0x7f/255, green: 0x98/255, blue: 0xa8/255),
-        Color(red: 0x8f/255, green: 0xa7/255, blue: 0x6f/255),
-        Color(red: 0xe0/255, green: 0xa4/255, blue: 0x58/255),
-        Color(red: 0x6f/255, green: 0xa8/255, blue: 0xa0/255),
-        Color(red: 0xb9/255, green: 0xc0/255, blue: 0xae/255),
+        dynamicColor(rgb(0x3f8a76), rgb(0x57a48f)),
+        dynamicColor(rgb(0xb99f4e), rgb(0xd9c589)),
+        dynamicColor(rgb(0xa8603f), rgb(0xc97b5d)),
+        dynamicColor(rgb(0x5f7f92), rgb(0x7f98a8)),
+        dynamicColor(rgb(0x6f8c52), rgb(0x8fa76f)),
+        dynamicColor(rgb(0xb0783a), rgb(0xe0a458)),
+        dynamicColor(rgb(0x4f8b83), rgb(0x6fa8a0)),
+        dynamicColor(rgb(0x8f968a), rgb(0xb9c0ae)),
     ]
+
+    /// 辉光渐变透明度（浅色下减弱）
+    static var glowOpacity: Double { bestMatchDark ? 0.10 : 0.05 }
+    static var secondaryGlowOpacity: Double { bestMatchDark ? 0.04 : 0.03 }
+    static var bestMatchDark: Bool {
+        NSApp?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
 }
 
 // MARK: - 格式化（web/src/format.ts 同口径）

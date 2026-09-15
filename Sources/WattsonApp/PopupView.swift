@@ -43,7 +43,6 @@ struct PopupView: View {
         // 不给定固定高度窗口会塌缩成只剩头尾
         .frame(width: 384, height: 500)
         .background(popupBackground.ignoresSafeArea())
-        .preferredColorScheme(.dark)
         .task { await state.pollQuotaNow() }
     }
 
@@ -52,7 +51,7 @@ struct PopupView: View {
     private var popupBackground: some View {
         ZStack {
             Theme.bg
-            RadialGradient(colors: [Theme.accent.opacity(0.10), .clear],
+            RadialGradient(colors: [Theme.accent.opacity(Theme.glowOpacity), .clear],
                            center: UnitPoint(x: 0.9, y: -0.2), startRadius: 10, endRadius: 420)
         }
     }
@@ -207,20 +206,18 @@ struct PopupView: View {
                     .font(.system(size: 12, weight: .semibold))
                 if let plan = a.planName, plan != shortName {
                     Text(plan)
-                        .font(.system(size: 10))
-                        .foregroundColor(Color(red: 0xd5/255, green: 0xe5/255, blue: 0xde/255))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.white)
                         .padding(.horizontal, 7)
-                        .background(Capsule().fill(Theme.accentSoft))
-                        .overlay(Capsule().strokeBorder(Theme.accent.opacity(0.4)))
+                        .background(Capsule().fill(Theme.accent))
                         .lineLimit(1)
                 }
                 if let rc = a.resetCredits, rc > 0 {
                     Text("重置卡 ×\(Int(rc))")
-                        .font(.system(size: 10))
-                        .foregroundColor(Color(red: 0xf0/255, green: 0xd9/255, blue: 0xac/255))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.white)
                         .padding(.horizontal, 7)
-                        .background(Capsule().fill(Theme.warn.opacity(0.12)))
-                        .overlay(Capsule().strokeBorder(Theme.warn.opacity(0.4)))
+                        .background(Capsule().fill(Theme.warn))
                 }
                 Spacer()
             }
