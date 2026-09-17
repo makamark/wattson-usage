@@ -187,6 +187,8 @@ enum QuotaShort {
         "fiveHour": "5小时", "week": "周", "weekSonnet": "周·Sonnet", "extra": "额外",
         "cycle": "周期", "credits": "积分", "limit": "Key 限额",
         "editPredictions": "补全", "rate": "速率",
+        "gemini-fiveHour": "Gemini 5h", "gemini-week": "Gemini 周",
+        "claude-fiveHour": "C&G 5h", "claude-week": "C&G 周",
     ]
     static let kind: [String: String] = {
         var m: [String: String] = [:]
@@ -201,7 +203,7 @@ enum QuotaShort {
         "glm": "zai", "codex": "openai", "claude": "claude", "cursor": "cursor",
         "workbuddy": "codebuddy", "trae": "trae", "kimi": "kimi", "gemini": "gemini",
         "grok": "grok", "kiro": "kiro", "copilot": "github", "openrouter": "openrouter",
-        "minimax": "minimax",
+        "minimax": "minimax", "antigravity": "antigravity",
     ]
 }
 
