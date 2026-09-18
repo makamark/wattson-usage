@@ -208,6 +208,14 @@ final class AntigravityClientCache: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         winner = (id, secret)
     }
+
+    /// 测试隔离用：单例跨用例残留会污染刷新候选的断言
+    func resetForTests() {
+        lock.lock(); defer { lock.unlock() }
+        scanned = false
+        candidates = nil
+        winner = nil
+    }
 }
 
 // MARK: - Token 刷新

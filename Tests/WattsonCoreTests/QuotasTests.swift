@@ -8,6 +8,12 @@ import XCTest
 private func rt(_ any: Any) -> FakeRoute { .json(JSON.fromAny(any)) }
 
 final class QuotasTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        // 进程级 OAuth client 缓存会把前一个用例的命中对带到后一个，先清空
+        AntigravityClientCache.shared.resetForTests()
+    }
+
     // MARK: - codex
 
     private let CODEX_OK = rt([
@@ -859,12 +865,12 @@ final class QuotasTests: XCTestCase {
         XCTAssertGreaterThan(recorder.count, n)
     }
 
-    func testPollerAllMissingCredentialsYieldsSixteenAccountsWithoutNetwork() async {
+    func testPollerAllMissingCredentialsYieldsSeventeenAccountsWithoutNetwork() async {
         let recorder = FetchRecorder()
         let fetch = fakeFetch([:], recorder: recorder)
         let poller = QuotaPoller(home: "/nonexistent", env: [:], fetchImpl: fetch)
         let snap = await poller.current()
-        XCTAssertEqual(snap.accounts.count, 16)
+        XCTAssertEqual(snap.accounts.count, 17)
         XCTAssertTrue(snap.accounts.allSatisfy { $0.unavailableReason == "no_credentials" })
         XCTAssertEqual(recorder.count, 0)
     }
