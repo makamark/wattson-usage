@@ -20,6 +20,7 @@ let PROVIDER_ORDER: [(QuotaKind, String)] = [
     (.copilot, "Copilot"),
     (.openrouter, "OpenRouter"),
     (.minimax, "MiniMax"),
+    (.antigravity, "Antigravity"),
 ]
 
 public final class QuotaPoller: @unchecked Sendable {
@@ -137,5 +138,6 @@ func fetchProvider(_ kind: QuotaKind, _ home: String, _ env: [String: String],
     case .copilot: return await copilotAccount(home, env: env, doFetch: doFetch, now: now)
     case .openrouter: return await openrouterAccount(home, env: env, doFetch: doFetch, now: now)
     case .minimax: return await minimaxAccount(home, env: env, doFetch: doFetch, now: now)
+    case .antigravity: return await antigravityAccount(home: home, env: env, doFetch: doFetch, now: now)
     }
 }

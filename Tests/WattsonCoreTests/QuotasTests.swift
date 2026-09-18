@@ -493,6 +493,165 @@ final class QuotasTests: XCTestCase {
         XCTAssertEqual(auth?.regions.first?.apiBase, "https://api.minimaxi.com")
     }
 
+    // MARK: - antigravity
+
+    /// go-keyring-base64 编码的 Keychain 原始输出（expiry 为带时区偏移的 ISO 串）
+    private func keychainOutput(expiry: String) -> String {
+        let payload: [String: Any] = [
+            "token": ["access_token": "ya29.ag", "refresh_token": "1//ag-refresh", "expiry": expiry],
+            "auth_method": "oauth",
+        ]
+        let data = try! JSONSerialization.data(withJSONObject: payload)
+        return "go-keyring-base64:" + data.base64EncodedString()
+    }
+
+    private let AG_SUMMARY = rt([
+        "groups": [
+            ["displayName": "Gemini Models", "buckets": [
+                ["displayName": "Five Hour Limit Remaining", "remainingFraction": 1, "resetTime": "2026-09-17T12:00:00Z"],
+                ["displayName": "Weekly Limit Remaining", "remainingFraction": 1],
+            ]],
+            ["displayName": "Claude and GPT models", "buckets": [
+                ["displayName": "Five Hour Limit Remaining", "remaining": ["remainingFraction": 0.8165304]],
+                ["displayName": "Weekly Limit Remaining", "remainingFraction": 0.9388435],
+            ]],
+        ],
+    ])
+
+    func testAntigravityKeychainOutputParsesAndRejectsGarbage() {
+        let creds = parseAntigravityKeychainOutput(keychainOutput(expiry: "2026-09-17T02:20:06.001353+08:00"))
+        XCTAssertEqual(creds?.accessToken, "ya29.ag")
+        XCTAssertEqual(creds?.refreshToken, "1//ag-refresh")
+        XCTAssertNotNil(creds?.expiryMs)
+        XCTAssertNil(parseAntigravityKeychainOutput("not-base64-json"))
+        XCTAssertNil(parseAntigravityKeychainOutput("go-keyring-base64:###"))
+        let noRefresh = try! JSONSerialization.data(withJSONObject: ["token": ["access_token": "a"]])
+        XCTAssertNil(parseAntigravityKeychainOutput(
+            "go-keyring-base64:" + noRefresh.base64EncodedString()))
+    }
+
+    func testAntigravityEnvInjectionAndDisable() {
+        let json = keychainOutput(expiry: "2026-09-17T02:20:06+08:00")
+            .dropFirst("go-keyring-base64:".count)
+        let decoded = String(data: Data(base64Encoded: String(json))!, encoding: .utf8)!
+        XCTAssertEqual(readAntigravityCreds(["ANTIGRAVITY_KEYCHAIN_JSON": decoded])?.refreshToken, "1//ag-refresh")
+        XCTAssertNil(readAntigravityCreds(["ANTIGRAVITY_KEYCHAIN_JSON": decoded, "ANTIGRAVITY_KEYCHAIN": "0"]))
+        XCTAssertNil(readAntigravityCreds(["ANTIGRAVITY_KEYCHAIN_JSON": "{bad"]))
+    }
+
+    func testAntigravitySummaryNormalizationAndOrder() {
+        let windows = parseAntigravityQuotaSummary(AG_SUMMARY.wrapped)
+        XCTAssertEqual(windows.map(\.key), ["gemini-fiveHour", "gemini-week", "claude-fiveHour", "claude-week"])
+        XCTAssertEqual(windows.map(\.label), ["Gemini 5小时", "Gemini 周额度", "Claude & GPT 5小时", "Claude & GPT 周额度"])
+        XCTAssertEqual(windows[2].percentage ?? -1, (1 - 0.8165304) * 100, accuracy: 1e-9)
+        XCTAssertEqual(windows[0].nextResetAt, 1_789_646_400_000)
+        // 顶层 response 包裹（Connect-RPC 载荷）兼容
+        XCTAssertEqual(parseAntigravityQuotaSummary(rt(["response": AG_SUMMARY.wrapped.obj!]).wrapped).count, 4)
+        XCTAssertTrue(parseAntigravityQuotaSummary(.null).isEmpty)
+    }
+
+    func testAntigravityCloudFlowHappyPathAndRefresh() async {
+        let fresh = AntigravityCreds(accessToken: "ya29.ag", refreshToken: "1//ag-refresh",
+                                     expiryMs: 1000 + 3600_000)
+        let recorder = FetchRecorder()
+        let fetch = fakeFetch([
+            "loadCodeAssist": rt(["planName": "Google AI Pro", "cloudaicompanionProject": "aicode-consumers"]),
+            "retrieveUserQuotaSummary": AG_SUMMARY,
+        ], recorder: recorder)
+        let acc = await fetchAntigravityAccount(fresh, fetch, 1000)
+        XCTAssertTrue(acc.available)
+        XCTAssertEqual(acc.planName, "Google AI Pro")
+        XCTAssertEqual(acc.windows.count, 4)
+        XCTAssertEqual(recorder.last()?.headers["authorization"], "Bearer ya29.ag")
+
+        // 临期 + env 提供的 OAuth client → 先刷新再拉取
+        let stale = AntigravityCreds(accessToken: "ya29.old", refreshToken: "1//ag-refresh",
+                                     expiryMs: 1000 + 60_000,
+                                     clientId: "env-client", clientSecret: "env-secret")
+        let recorder2 = FetchRecorder()
+        let fetch2 = fakeFetch([
+            "oauth2.googleapis.com": rt(["access_token": "ya29.fresh", "expires_in": 3600]),
+            "loadCodeAssist": rt(["planName": "Google AI Pro"]),
+            "retrieveUserQuotaSummary": AG_SUMMARY,
+        ], recorder: recorder2)
+        let acc2 = await fetchAntigravityAccount(stale, env: [:], fetch2, 1000)
+        XCTAssertTrue(acc2.available)
+        XCTAssertTrue(recorder2.urls[0].contains("oauth2.googleapis.com/token"))
+        XCTAssertEqual(recorder2.last()?.headers["authorization"], "Bearer ya29.fresh")
+        // 请求体携带 env 提供的 client
+        let form = recorder2.last(offset: 2)?.body ?? ""
+        XCTAssertTrue(form.contains("client_id=env-client"))
+    }
+
+    func testAntigravityScanExtractsClientCandidatesFromBinary() {
+        // 假值刻意不符合真实 id（12 位数字 + 32 位尾段）与真实 secret 长度，
+        // 避免被当作真实凭据；NUL 模拟 Go 字符串常量 blob 的边界
+        let nul = "\u{00}"
+        let bin = Data([
+            "junk", nul,
+            "1234567-abc123def4.apps.googleusercontent.com", nul,
+            "GOCSPX-fake-token000000000", nul, "https",
+            "7654321-xyz987wvu.apps.googleusercontent.com",
+            "GOCSPX-second0123456789012345", nul,
+        ].joined().utf8)
+        let found = scanOAuthCandidates(bin)
+        XCTAssertTrue(found.ids.contains("1234567-abc123def4"))
+        // id 前紧邻 "https" 字母串：后缀锚定正则仍能取出正确形态
+        XCTAssertTrue(found.ids.contains("7654321-xyz987wvu"))
+        XCTAssertTrue(found.secrets.contains("GOCSPX-fake-token000000000"))
+        XCTAssertTrue(found.secrets.contains("GOCSPX-second0123456789012345"))
+    }
+
+    func testAntigravityRefreshTriesBinaryCandidatesAndCachesWinner() async {
+        let creds = AntigravityCreds(accessToken: nil, refreshToken: "1//ag-refresh", expiryMs: nil,
+                                     clientId: nil, clientSecret: nil)
+        let recorder = FetchRecorder()
+        let fetch: FetchLike = { req in
+            recorder.append(req)
+            if req.url.contains("oauth2.googleapis.com") {
+                // 只有第一对候选（id1 + secret1）被 Google 接受，其余组合 400
+                guard let body = req.body, body.contains("client_id=1234567-abc123def4"),
+                      body.contains("client_secret=GOCSPX-fake-token000000000") else {
+                    return FetchResponse(status: 400, body: .null)
+                }
+                return FetchResponse(status: 200, body: rt(["access_token": "ya29.from-candidate"]).wrapped)
+            }
+            if req.url.contains("loadCodeAssist") {
+                return FetchResponse(status: 200, body: rt(["planName": "Google AI Pro"]).wrapped)
+            }
+            return FetchResponse(status: 200, body: self.AG_SUMMARY.wrapped)
+        }
+        let tmp = NSTemporaryDirectory() + "ag-bin-\(UUID().uuidString)"
+        let bin = "1234567-abc123def4.apps.googleusercontent.com"
+            + "GOCSPX-fake-token000000000"
+            + "7654321-xyz987wvu.apps.googleusercontent.com"
+            + "GOCSPX-second0123456789012345"
+        try? bin.write(toFile: tmp, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: tmp) }
+
+        let acc = await fetchAntigravityAccount(
+            creds, env: ["ANTIGRAVITY_APP_BIN": tmp],
+            readFile: { try? Data(contentsOf: URL(fileURLWithPath: $0)) }, fetch, 1000)
+        XCTAssertTrue(acc.available)
+        XCTAssertEqual(recorder.last()?.headers["authorization"], "Bearer ya29.from-candidate")
+        // 2 个 id × 2 个 secret = 4 对；第一对即命中 → 仅 1 次刷新请求
+        let refreshCalls = recorder.all().filter { $0.url.contains("oauth2.googleapis.com") }
+        XCTAssertEqual(refreshCalls.count, 1)
+        XCTAssertTrue(refreshCalls[0].body?.contains("client_id=1234567-abc123def4") ?? false)
+    }
+
+    func testAntigravityQuotaFailureIsIsolatedAsError() async {
+        let creds = AntigravityCreds(accessToken: "ya29.ag", refreshToken: "1//ag-refresh", expiryMs: nil)
+        let fetch = fakeFetch([
+            "loadCodeAssist": rt(["planName": "Google AI Pro"]),
+            "retrieveUserQuotaSummary": .error(HTTPStatusError(status: 500, message: "HTTP 500")),
+        ])
+        let acc = await fetchAntigravityAccount(creds, fetch, 1000)
+        XCTAssertFalse(acc.available)
+        XCTAssertEqual(acc.unavailableReason, "http_error")
+        XCTAssertNil(acc.lastSuccessAt)
+    }
+
     // MARK: - zed
 
     private let ZED_OK = rt([

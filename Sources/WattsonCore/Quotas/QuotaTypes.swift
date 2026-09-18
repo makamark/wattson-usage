@@ -7,6 +7,7 @@ public enum QuotaKind: String, Sendable, CaseIterable, Codable {
     case glm, codex, claude, cursor, workbuddy, trae
     case kimi, gemini, grok, zed, kiro, codebuff, factory
     case copilot, openrouter, minimax
+    case antigravity
 }
 
 public struct QuotaWindow: Sendable, Equatable, Hashable {
