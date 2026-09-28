@@ -10,6 +10,13 @@ let dataDir = (env["WATTSON_DATA_DIR"].flatMap { $0.isEmpty ? nil : $0 }
 let configPath = env["WATTSON_CONFIG"].flatMap { $0.isEmpty ? nil : $0 }
     ?? (dataDir as NSString).appendingPathComponent("agg.config.json")
 
+// doctor 子命令：跑健康检查后退出（不加载服务流程）
+if CommandLine.arguments.contains("doctor") {
+    let report = doctorChecks(env: env, configPath: configPath, dataDir: dataDir)
+    print(renderDoctorReport(report))
+    exit(report.allOk ? 0 : 1)
+}
+
 let fileConfig: FileConfig
 do {
     fileConfig = try loadFileConfig(configPath)

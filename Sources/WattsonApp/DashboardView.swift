@@ -117,6 +117,7 @@ struct DashboardView: View {
             KpiSection(state: state)
             FilterBarSection(state: state)
             MainChartSection(state: state)
+            HeatmapSection(state: state)
             PlanSection(state: state)
             HostsSection(state: state)
             MatrixSection(state: state)
@@ -953,5 +954,88 @@ private struct FlowLegend: Layout {
             x += add
         }
         return lines
+    }
+}
+
+// MARK: - 活动热力图（GitHub contributions 风格）
+
+private struct HeatmapSection: View {
+    @ObservedObject var state: AppState
+
+    private var data: HeatmapResult {
+        let f = state.filters
+        let now = Date().timeIntervalSince1970 * 1000
+        // 热力图展示全窗口：吃 host/tool/model/project 维度筛选，但忽略时间范围
+        // （时间趋势已有主图承担，二者互补）
+        let rows = filterRows(state.snapshot.rows,
+                              RowFilter(hosts: f.hosts, tools: f.tools,
+                                        models: f.models, projects: f.projects),
+                              now)
+        return heatmapDays(rows, weeks: 26, now: now)
+    }
+
+    private static let tipFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.dateFormat = "M月d日"
+        return df
+    }()
+
+    private static func cellColor(_ tokens: Double, max: Double) -> Color {
+        guard tokens > 0, max > 0 else { return Theme.accent.opacity(0.08) }
+        let ratio = tokens / max
+        let level = ratio >= 0.66 ? 3 : ratio >= 0.33 ? 2 : 1
+        return Theme.accent.opacity([0.08, 0.35, 0.6, 0.9][level])
+    }
+
+    private static func tip(_ cell: HeatmapDay) -> String {
+        let tokens: String
+        if cell.tokens >= 1_000_000 {
+            tokens = String(format: "%.1fM", cell.tokens / 1_000_000)
+        } else if cell.tokens >= 1_000 {
+            tokens = String(format: "%.1fK", cell.tokens / 1_000)
+        } else {
+            tokens = String(Int(cell.tokens))
+        }
+        let date = tipFormatter.string(from: Date(timeIntervalSince1970: cell.dayStart / 1000))
+        return "\(date) · \(tokens) tokens"
+    }
+
+    var body: some View {
+        let d = data
+        Card(title: "活跃热力图") {
+            VStack(alignment: .leading, spacing: 8) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 3) {
+                        ForEach(0..<d.columns.count, id: \.self) { col in
+                            VStack(spacing: 3) {
+                                ForEach(0..<7, id: \.self) { row in
+                                    if let cell = d.columns[col][row] {
+                                        RoundedRectangle(cornerRadius: 2.5)
+                                            .fill(Self.cellColor(cell.tokens, max: d.maxTokens))
+                                            .frame(width: 11, height: 11)
+                                            .help(Self.tip(cell))
+                                    } else {
+                                        Color.clear.frame(width: 11, height: 11)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                HStack(spacing: 6) {
+                    Text("少").font(.system(size: 11)).foregroundColor(Theme.muted2)
+                    ForEach(0..<5, id: \.self) { level in
+                        RoundedRectangle(cornerRadius: 2.5)
+                            .fill(Theme.accent.opacity([0.08, 0.35, 0.6, 0.9, 0.9][level]))
+                            .frame(width: 11, height: 11)
+                    }
+                    Text("多").font(.system(size: 11)).foregroundColor(Theme.muted2)
+                    Spacer()
+                    Text("\(d.activeDays) 个活跃日 · 连续 \(d.streakDays) 天")
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.muted2)
+                }
+            }
+        }
     }
 }

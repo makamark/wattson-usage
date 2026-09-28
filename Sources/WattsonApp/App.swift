@@ -122,6 +122,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         log.target = self
         menu.addItem(log)
 
+        let doctor = NSMenuItem(title: "诊断…", action: #selector(menuRunDoctor), keyEquivalent: "")
+        doctor.target = self
+        menu.addItem(doctor)
+
         let quit = NSMenuItem(title: "退出 Wattson", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         menu.addItem(quit)
 
@@ -136,6 +140,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     @objc private func menuSyncRemote() { appState.runMirrorNow() }
     @objc private func menuToggleLoginItem() { appState.toggleLoginItem() }
     @objc private func menuOpenLogFile() { appState.openLogFile() }
+
+    @objc private func menuRunDoctor() {
+        let report = doctorChecks()
+        let alert = NSAlert()
+        alert.messageText = report.allOk ? "诊断：全部检查通过" : "诊断：存在未通过项"
+        alert.informativeText = renderDoctorReport(report)
+        alert.alertStyle = report.allOk ? .informational : .warning
+        alert.runModal()
+    }
 
     // MARK: 看板窗口
 

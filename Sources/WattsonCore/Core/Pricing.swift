@@ -131,8 +131,8 @@ private var remoteSnapshot: [String: SnapshotEntry] = [:]
 let LITELLM_PRICING_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 let PRICING_CACHE_TTL: TimeInterval = 24 * 3600
 
-private func pricingCachePath() -> String {
-    ((homePath() as NSString).appendingPathComponent("wattson/cache")) + "/litellm-prices.json"
+func pricingCachePath(home: String? = nil) -> String {
+    ((home ?? homePath()) as NSString).appendingPathComponent("wattson/cache") + "/litellm-prices.json"
 }
 
 /// 装载/刷新 LiteLLM 价目：缓存 24h 内直接用，否则拉取远端并回写缓存。
