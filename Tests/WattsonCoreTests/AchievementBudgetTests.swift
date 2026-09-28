@@ -137,3 +137,21 @@ final class BudgetTests: XCTestCase {
         XCTAssertEqual(status.level, .over)
     }
 }
+
+final class PunchcardTests: XCTestCase {
+    func testHourBucketing() {
+        let grid = hourProfile([testRow(testDay(2026, 9, 30, 14))], calendar: testCal)
+        XCTAssertEqual(grid[2][14], 100)  // 周三 14 时
+        for r in 0..<7 {
+            for h in 0..<24 where !(r == 2 && h == 14) {
+                XCTAssertEqual(grid[r][h], 0, "row \(r) hour \(h)")
+            }
+        }
+    }
+
+    func testEmptyGridShape() {
+        let grid = hourProfile([], calendar: testCal)
+        XCTAssertEqual(grid.count, 7)
+        XCTAssertTrue(grid.allSatisfy { $0.count == 24 && $0.allSatisfy { $0 == 0 } })
+    }
+}

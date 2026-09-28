@@ -119,6 +119,7 @@ struct DashboardView: View {
             FilterBarSection(state: state)
             MainChartSection(state: state)
             HeatmapSection(state: state)
+            PunchcardSection(state: state)
             PlanSection(state: state)
             HostsSection(state: state)
             MatrixSection(state: state)
@@ -1213,6 +1214,71 @@ private struct BudgetBannerSection: View {
             parts.append("成本 $\(String(format: "%.2f", used)) / $\(String(format: "%.0f", limit))")
         }
         return (b.level == .over ? "预算超限：" : "预算提醒：") + parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - 时刻分布（punchcard：周 × 小时热力格）
+
+private struct PunchcardSection: View {
+    @ObservedObject var state: AppState
+
+    private static let dayLabels = ["一", "二", "三", "四", "五", "六", "日"]
+    private static let opacities: [Double] = [0.08, 0.3, 0.55, 0.85]
+
+    private static func color(_ v: Double, max: Double) -> Color {
+        guard v > 0, max > 0 else { return Theme.accent.opacity(0.08) }
+        let ratio = v / max
+        let level = ratio >= 0.66 ? 3 : ratio >= 0.33 ? 2 : 1
+        return Theme.accent.opacity(opacities[level])
+    }
+
+    private static func tip(_ weekday: Int, _ hour: Int, _ tokens: Double) -> String {
+        let names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        return "\(names[weekday]) \(hour) 时 · \(Fmt.tokens(tokens))"
+    }
+
+    var body: some View {
+        let g = hourProfile(state.snapshot.rows)
+        let maxV = g.flatMap { $0 }.max() ?? 0
+        Card(title: "时刻分布") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 6) {
+                    VStack(spacing: 3) {
+                        ForEach(0..<7, id: \.self) { r in
+                            Text(Self.dayLabels[r])
+                                .font(.system(size: 9))
+                                .foregroundColor(Theme.muted2)
+                                .frame(width: 14, height: 9, alignment: .trailing)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(0..<7, id: \.self) { r in
+                            HStack(spacing: 3) {
+                                ForEach(0..<24, id: \.self) { h in
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(Self.color(g[r][h], max: maxV))
+                                        .frame(width: 12, height: 9)
+                                        .help(g[r][h] > 0 ? Self.tip(r, h, g[r][h]) : "")
+                                }
+                            }
+                        }
+                    }
+                }
+                HStack(spacing: 6) {
+                    Text("少").font(.system(size: 11)).foregroundColor(Theme.muted2)
+                    ForEach(0..<4, id: \.self) { level in
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Theme.accent.opacity(Self.opacities[level]))
+                            .frame(width: 12, height: 9)
+                    }
+                    Text("多").font(.system(size: 11)).foregroundColor(Theme.muted2)
+                    Spacer()
+                    Text("本地时区 · 全量数据按小时聚合")
+                        .font(.system(size: 11))
+                        .foregroundColor(Theme.muted2)
+                }
+            }
+        }
     }
 }
 

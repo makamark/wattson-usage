@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     private var mirrorProcessRunning = false
     // 置顶迷你视图（菜单项开关；nil = 关闭）
     private var floatPanel: NSPanel?
+    private var notchPanel: NSPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -133,6 +134,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         floatItem.state = floatPanel != nil ? .on : .off
         menu.addItem(floatItem)
 
+        let notchItem = NSMenuItem(title: "灵动岛", action: #selector(menuToggleNotch), keyEquivalent: "")
+        notchItem.target = self
+        notchItem.state = notchPanel != nil ? .on : .off
+        menu.addItem(notchItem)
+
         let quit = NSMenuItem(title: "退出 Wattson", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         menu.addItem(quit)
 
@@ -162,6 +168,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     @objc private func menuToggleFloat() {
         toggleOverlayPanel(&floatPanel, size: NSSize(width: 250, height: 190),
                            content: AnyView(FloatWidgetView(state: appState)), notch: false)
+    }
+
+    @objc private func menuToggleNotch() {
+        toggleOverlayPanel(&notchPanel, size: NSSize(width: 300, height: 42),
+                           content: AnyView(NotchPillView(state: appState)), notch: true)
     }
 
     /// 无边框非激活面板：点击不抢焦点、跨全部 Space、跟随系统外观配色。
@@ -316,5 +327,42 @@ fileprivate struct FloatWidgetView: View {
         .frame(width: 250)
         .background(RoundedRectangle(cornerRadius: 14).fill(Theme.bg)
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border)))
+    }
+}
+
+// MARK: - 灵动岛（顶部居中胶囊：今日用量 + 首个可用账号剩余额度）
+
+fileprivate struct NotchPillView: View {
+    @ObservedObject var state: AppState
+
+    private var todayTokens: Double {
+        let midnight = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970 * 1000
+        return state.snapshot.rows.filter { $0.ts >= midnight }.reduce(0) { $0 + rowTokens($1) }
+    }
+
+    private var quotaLine: String? {
+        guard let acct = state.quota.accounts.first(where: { $0.available }),
+              let w = acct.windows.first,
+              let p = w.percentage ?? w.usedPercent else { return nil }
+        return "\(acct.label) 剩余 \(Int(max(0, 100 - p)))%"
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("⚡").font(.system(size: 13))
+            Text("今日 \(Fmt.tokens(todayTokens))")
+                .font(.system(size: 12, weight: .semibold))
+                .monospacedDigit()
+            if let line = quotaLine {
+                Text(line)
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.muted)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .background(Capsule().fill(Theme.bg)
+            .overlay(Capsule().strokeBorder(Theme.border)))
     }
 }
