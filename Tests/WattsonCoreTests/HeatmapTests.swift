@@ -26,7 +26,7 @@ final class HeatmapTests: XCTestCase {
     }
 
     func testEmptyRowsProducesFullWindow() {
-        let r = heatmapDays([], weeks: 4, now: day(2026, 9, 28), calendar: cal)
+        let r = heatmapDays([], days: 28, now: day(2026, 9, 28), calendar: cal)
         XCTAssertEqual(r.days.count, 28)
         XCTAssertEqual(r.totalTokens, 0)
         XCTAssertEqual(r.activeDays, 0)
@@ -42,7 +42,7 @@ final class HeatmapTests: XCTestCase {
             row(day(2026, 9, 27), tin: 200),  // 周日
             row(day(2026, 9, 28, 23), tin: 300),  // 周一（今天，深夜）
         ]
-        let r = heatmapDays(rows, weeks: 2, now: day(2026, 9, 28, 23), calendar: cal)
+        let r = heatmapDays(rows, days: 14, now: day(2026, 9, 28, 23), calendar: cal)
         XCTAssertEqual(r.days.count, 14)
         XCTAssertEqual(r.totalTokens, 600)
         XCTAssertEqual(r.maxTokens, 300)
@@ -65,19 +65,19 @@ final class HeatmapTests: XCTestCase {
 
     func testRowsOutsideWindowIgnored() {
         let rows = [row(day(2026, 8, 20), tin: 500), row(day(2026, 9, 28), tin: 100)]
-        let r = heatmapDays(rows, weeks: 2, now: day(2026, 9, 28), calendar: cal)
+        let r = heatmapDays(rows, days: 14, now: day(2026, 9, 28), calendar: cal)
         XCTAssertEqual(r.totalTokens, 100)
         XCTAssertEqual(r.activeDays, 1)
     }
 
     func testStreakBreaksOnInactiveDay() {
         let rows = [row(day(2026, 9, 26)), row(day(2026, 9, 28))]
-        let r = heatmapDays(rows, weeks: 2, now: day(2026, 9, 28), calendar: cal)
+        let r = heatmapDays(rows, days: 14, now: day(2026, 9, 28), calendar: cal)
         XCTAssertEqual(r.streakDays, 1)  // 9/27 空档，只剩今天
     }
 
     func testDaysStrictlyIncreasing() {
-        let r = heatmapDays([row(day(2026, 9, 1))], weeks: 8, now: day(2026, 9, 28), calendar: cal)
+        let r = heatmapDays([row(day(2026, 9, 1))], days: 56, now: day(2026, 9, 28), calendar: cal)
         XCTAssertEqual(r.days.count, 56)
         for i in 1..<r.days.count {
             XCTAssertEqual(r.days[i].dayStart - r.days[i - 1].dayStart, 24 * 3600 * 1000)

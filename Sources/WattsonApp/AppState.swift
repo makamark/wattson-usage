@@ -15,6 +15,8 @@ final class AppState: ObservableObject {
     @Published private(set) var proxyNote: String?
     /// API 服务启动失败原因（如端口被外部实例占用）；nil = 正常监听
     @Published private(set) var serverError: String?
+    /// 月度预算状态（budget.json 未配置 = nil，UI 不出预算条）
+    @Published private(set) var budgetData: BudgetStatus?
     /// 状态栏小窗的统计范围（popup.html sel-range，默认 24h）
     @Published var popupRange: RangeOption = .h24
     /// 看板全局筛选（web/src/state.ts filters，默认 30d × model × tokens）
@@ -129,6 +131,8 @@ final class AppState: ObservableObject {
 
     let collector: Collector
     let poller: QuotaPoller
+    /// 月度预算配置（init 时读一次 ~/.config/wattson/budget.json）
+    let budget: Budget
     private var server: AggServer?
     private var timer: Any?
     private var mirrorRunning = false
@@ -142,7 +146,8 @@ final class AppState: ObservableObject {
         let tokens = snapshot.rows
             .filter { $0.ts >= Date.nowMs() - 24 * 3600 * 1000 }
             .reduce(0.0) { $0 + rowTokens($1) }
-        return tokens > 0 ? "⚡ \(formatTokens(tokens))" : "⚡"
+        let base = tokens > 0 ? "⚡ \(formatTokens(tokens))" : "⚡"
+        return budgetData?.level == .over ? base + " ⚠️" : base
     }
 
     init() {
@@ -162,6 +167,7 @@ final class AppState: ObservableObject {
 
         let (quotaFetch, proxyUrl) = createQuotaFetch(env: env)
         proxyNote = proxyUrl.map { "额度出网代理：\($0)" }
+        budget = loadBudget(env: env)
         collector = Collector()
         poller = QuotaPoller(env: env, fetchImpl: quotaFetch)
 
@@ -203,6 +209,7 @@ final class AppState: ObservableObject {
         refreshing = true
         _ = await collector.refresh()
         snapshot = collector.snapshot
+        budgetData = budget.enabled ? budgetStatus(snapshot.rows, budget: budget, now: Date.nowMs()) : nil
         refreshing = false
     }
 

@@ -186,4 +186,25 @@ extension AppState {
             .filter { $0.tokens > 0 }
             .sorted { $0.tokens > $1.tokens }
     }
+
+    // MARK: 悬浮组件 / 灵动岛的数据口径（固定 24h，不跟看板筛选走）
+
+    private var h24Filters: DashboardFilters {
+        var f = DashboardFilters()
+        f.range = .h24
+        return f
+    }
+
+    /// 近 24 小时主口径概览
+    func h24Overview() -> OverviewResult {
+        overviewData(h24Filters).main
+    }
+
+    /// 近 24 小时 Top-N 工具（facetTool 已按 token 降序，过滤零值后取前 N）
+    func h24TopTools(_ n: Int = 3) -> [(name: String, tokens: Double, cost: Double?)] {
+        overviewData(h24Filters).facetTool
+            .filter { $0.1.tokens > 0 }
+            .prefix(n)
+            .map { (name: $0.0, tokens: $0.1.tokens, cost: $0.1.cost) }
+    }
 }

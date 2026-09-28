@@ -8,11 +8,14 @@ public struct HeatmapDay: Sendable, Equatable {
     public var dayStart: Double   // 本地日桶起点（epoch 毫秒）
     public var tokens: Double
     public var calls: Double
+    /// 当日存储成本合计；当日无任何带成本行 = nil（口径同 overview.totalCost）
+    public var cost: Double?
 
-    public init(dayStart: Double, tokens: Double, calls: Double) {
+    public init(dayStart: Double, tokens: Double, calls: Double, cost: Double? = nil) {
         self.dayStart = dayStart
         self.tokens = tokens
         self.calls = calls
+        self.cost = cost
     }
 }
 
@@ -60,30 +63,39 @@ func heatmapDayStart(_ ms: Double, _ cal: Calendar) -> Double {
     cal.startOfDay(for: Date(timeIntervalSince1970: ms / 1000)).timeIntervalSince1970 * 1000
 }
 
-public func heatmapDays(_ rows: [UsageRow], weeks: Int, now: Double,
+/// `days` = 窗口内自然日数（不必是 7 的倍数，首列空位由 leadingBlanks 吸收），
+/// 以今天为最后一天往回取连续 days 个本地日。
+public func heatmapDays(_ rows: [UsageRow], days: Int, now: Double,
                         calendar: Calendar = .current) -> HeatmapResult {
-    let window = max(1, weeks)
+    let window = max(1, days)
     let dayMs: Double = 24 * 3600 * 1000
     let endDay = heatmapDayStart(now, calendar)
-    let windowStart = endDay - Double(window * 7 - 1) * dayMs
+    let windowStart = endDay - Double(window - 1) * dayMs
     // weekday: 1=周日…7=周六；换算成周一=0 的列索引
     let leadingBlanks = (calendar.component(
         .weekday, from: Date(timeIntervalSince1970: windowStart / 1000)) + 5) % 7
 
     var tokens: [Double: Double] = [:]
     var calls: [Double: Double] = [:]
+    var costs: [Double: Double] = [:]
+    var costSeen: Set<Double> = []
     for r in rows {
         let day = heatmapDayStart(r.ts, calendar)
         guard day >= windowStart, day <= endDay else { continue }
         tokens[day, default: 0] += rowTokens(r)
         calls[day, default: 0] += 1
+        if let c = r.cost {
+            costs[day, default: 0] += c
+            costSeen.insert(day)
+        }
     }
 
     // 逐本地日推进：raw 步进直到 startOfDay 取得进展（跨 DST 的 23h/25h 日安全）
     var days: [HeatmapDay] = []
     var day = windowStart
     while day <= endDay {
-        days.append(HeatmapDay(dayStart: day, tokens: tokens[day] ?? 0, calls: calls[day] ?? 0))
+        days.append(HeatmapDay(dayStart: day, tokens: tokens[day] ?? 0, calls: calls[day] ?? 0,
+                               cost: costSeen.contains(day) ? (costs[day] ?? 0) : nil))
         var raw = day + dayMs
         while heatmapDayStart(raw, calendar) <= day { raw += dayMs }
         day = heatmapDayStart(raw, calendar)

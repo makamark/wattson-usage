@@ -26,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
     private var cancellable: AnyCancellable?
     private var lastPopupHideAt: TimeInterval = 0
     private var mirrorProcessRunning = false
+    // 置顶迷你视图（菜单项开关；nil = 关闭）
+    private var floatPanel: NSPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -126,6 +128,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         doctor.target = self
         menu.addItem(doctor)
 
+        let floatItem = NSMenuItem(title: "悬浮组件", action: #selector(menuToggleFloat), keyEquivalent: "")
+        floatItem.target = self
+        floatItem.state = floatPanel != nil ? .on : .off
+        menu.addItem(floatItem)
+
         let quit = NSMenuItem(title: "退出 Wattson", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         menu.addItem(quit)
 
@@ -148,6 +155,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
         alert.informativeText = renderDoctorReport(report)
         alert.alertStyle = report.allOk ? .informational : .warning
         alert.runModal()
+    }
+
+    // MARK: 悬浮组件 / 灵动岛（NSPanel 置顶迷你视图，同一开关方法复用）
+
+    @objc private func menuToggleFloat() {
+        toggleOverlayPanel(&floatPanel, size: NSSize(width: 250, height: 190),
+                           content: AnyView(FloatWidgetView(state: appState)), notch: false)
+    }
+
+    /// 无边框非激活面板：点击不抢焦点、跨全部 Space、跟随系统外观配色。
+    /// 灵动岛变体钉在主屏（刘海屏）顶部居中，普通变体居中显示、可拖动。
+    private func toggleOverlayPanel(_ box: inout NSPanel?, size: NSSize,
+                                    content: AnyView, notch: Bool) {
+        if let panel = box {
+            panel.orderOut(nil)
+            box = nil
+            return
+        }
+        let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
+                            styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.level = notch ? .statusBar : .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isMovableByWindowBackground = true
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.contentView = NSHostingView(rootView: content)
+        if notch, let screen = NSScreen.screens.first ?? NSScreen.main {
+            let f = screen.frame
+            panel.setFrameOrigin(NSPoint(x: f.midX - size.width / 2, y: f.maxY - size.height - 2))
+        } else {
+            panel.center()
+        }
+        panel.orderFrontRegardless()
+        box = panel
     }
 
     // MARK: 看板窗口
@@ -211,5 +255,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPo
 
     private var loginItemEnabled: Bool {
         SMAppService.mainApp.status == .enabled
+    }
+}
+
+// MARK: - 悬浮组件（置顶迷你卡：24h KPI + Top 工具 + 额度剩余一行）
+
+fileprivate struct FloatWidgetView: View {
+    @ObservedObject var state: AppState
+
+    private var quotaLine: String? {
+        guard let acct = state.quota.accounts.first(where: { $0.available }),
+              let w = acct.windows.first,
+              let p = w.percentage ?? w.usedPercent else { return nil }
+        return "\(acct.label) 剩余 \(Int(max(0, 100 - p)))%"
+    }
+
+    var body: some View {
+        let main = state.h24Overview()
+        let top = state.h24TopTools()
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("⚡ 近 24 小时")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(Theme.muted)
+                Spacer()
+                if state.snapshot.refreshing {
+                    Text("解析中…").font(.system(size: 9)).foregroundColor(Theme.warn)
+                }
+            }
+            Text(Fmt.tokens(main.totalTokens))
+                .font(.system(size: 24, weight: .semibold))
+                .monospacedDigit()
+            HStack(spacing: 10) {
+                Label("\(Fmt.int(main.calls)) 次调用", systemImage: "doc.plaintext")
+                if let c = main.totalCost {
+                    Label(Fmt.cost(c), systemImage: "dollarsign.circle")
+                }
+            }
+            .font(.system(size: 10.5))
+            .foregroundColor(Theme.muted)
+            if !top.isEmpty {
+                Divider().overlay(Theme.border)
+                ForEach(top, id: \.name) { item in
+                    HStack {
+                        Text(item.name).font(.system(size: 11)).lineLimit(1)
+                        Spacer()
+                        Text(Fmt.tokens(item.tokens))
+                            .font(.system(size: 11))
+                            .monospacedDigit()
+                            .foregroundColor(Theme.muted)
+                    }
+                }
+            }
+            if let line = quotaLine {
+                Divider().overlay(Theme.border)
+                Text(line).font(.system(size: 10.5)).foregroundColor(Theme.muted)
+            }
+        }
+        .padding(14)
+        .frame(width: 250)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Theme.bg)
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.border)))
     }
 }

@@ -114,6 +114,7 @@ struct DashboardView: View {
 
     @ViewBuilder private var page: some View {
         VStack(alignment: .leading, spacing: 14) {
+            BudgetBannerSection(state: state)
             KpiSection(state: state)
             FilterBarSection(state: state)
             MainChartSection(state: state)
@@ -122,6 +123,7 @@ struct DashboardView: View {
             HostsSection(state: state)
             MatrixSection(state: state)
             ModelsSection(state: state)
+            AchievementsSection(state: state)
             Spacer(minLength: 8)
         }
         .padding(.bottom, 8)
@@ -962,21 +964,45 @@ private struct FlowLegend: Layout {
 private struct HeatmapSection: View {
     @ObservedObject var state: AppState
 
-    private var data: HeatmapResult {
+    private struct Hover: Equatable {
+        let col: Int
+        let row: Int
+        let day: HeatmapDay
+    }
+
+    @State private var gridWidth: CGFloat = 0
+    @State private var hovered: Hover?
+
+    private let gap: CGFloat = 3
+    private let labelWidth: CGFloat = 16
+    private let labelSpacing: CGFloat = 4
+    private let monthRowHeight: CGFloat = 15
+
+    private var filteredRows: [UsageRow] {
         let f = state.filters
-        let now = Date().timeIntervalSince1970 * 1000
-        // 热力图展示全窗口：吃 host/tool/model/project 维度筛选，但忽略时间范围
-        // （时间趋势已有主图承担，二者互补）
-        let rows = filterRows(state.snapshot.rows,
-                              RowFilter(hosts: f.hosts, tools: f.tools,
-                                        models: f.models, projects: f.projects),
-                              now)
-        return heatmapDays(rows, weeks: 26, now: now)
+        return filterRows(state.snapshot.rows,
+                          RowFilter(hosts: f.hosts, tools: f.tools,
+                                    models: f.models, projects: f.projects),
+                          Date.nowMs())
+    }
+
+    /// 窗口随顶栏时间范围联动：热力图是日粒度，对不足一天的范围给不出有意义的
+    /// 桶，今日/24h 展示近 7 天作上下文；「全部」取数据最早日到今天（上限 52 周）。
+    private func windowDays(_ rows: [UsageRow]) -> Int {
+        switch state.filters.range {
+        case .today, .h24, .d7: return 7
+        case .d30: return 30
+        case .all:
+            guard let earliest = rows.map(\.ts).min() else { return 182 }
+            let span = Int((Date.nowMs() - earliest) / (24 * 3600 * 1000)) + 1
+            return min(364, max(7, span))
+        }
     }
 
     private static let tipFormatter: DateFormatter = {
         let df = DateFormatter()
-        df.dateFormat = "M月d日"
+        df.dateFormat = "M月d日 EEE"
+        df.locale = Locale(identifier: "zh_CN")
         return df
     }()
 
@@ -987,55 +1013,270 @@ private struct HeatmapSection: View {
         return Theme.accent.opacity([0.08, 0.35, 0.6, 0.9][level])
     }
 
-    private static func tip(_ cell: HeatmapDay) -> String {
-        let tokens: String
-        if cell.tokens >= 1_000_000 {
-            tokens = String(format: "%.1fM", cell.tokens / 1_000_000)
-        } else if cell.tokens >= 1_000 {
-            tokens = String(format: "%.1fK", cell.tokens / 1_000)
-        } else {
-            tokens = String(Int(cell.tokens))
-        }
-        let date = tipFormatter.string(from: Date(timeIntervalSince1970: cell.dayStart / 1000))
-        return "\(date) · \(tokens) tokens"
-    }
-
     var body: some View {
-        let d = data
-        Card(title: "活跃热力图") {
-            VStack(alignment: .leading, spacing: 8) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 3) {
-                        ForEach(0..<d.columns.count, id: \.self) { col in
-                            VStack(spacing: 3) {
-                                ForEach(0..<7, id: \.self) { row in
-                                    if let cell = d.columns[col][row] {
-                                        RoundedRectangle(cornerRadius: 2.5)
-                                            .fill(Self.cellColor(cell.tokens, max: d.maxTokens))
-                                            .frame(width: 11, height: 11)
-                                            .help(Self.tip(cell))
-                                    } else {
-                                        Color.clear.frame(width: 11, height: 11)
-                                    }
-                                }
-                            }
+        let rows = filteredRows
+        let days = windowDays(rows)
+        let d = heatmapDays(rows, days: days, now: Date.nowMs())
+        let label: String
+        switch state.filters.range {
+        case .today, .h24, .d7: label = "近 7 天"
+        case .d30: label = "近 30 天"
+        case .all: label = days >= 364 ? "近 52 周" : "全部"
+        }
+        let cols = d.columns
+        let cell = cellSize(cols: cols.count)
+        return Card(title: "活跃热力图（\(label)）") {
+            ZStack(alignment: .topLeading) {
+                // 月份标签绝对定位在列上方（不挤占格子布局；跨月列才出标签）
+                ForEach(monthLabels(cols), id: \.col) { m in
+                    Text("\(m.month)月")
+                        .font(.system(size: 10))
+                        .foregroundColor(Theme.muted2)
+                        .offset(x: labelWidth + labelSpacing + CGFloat(m.col) * (cell + gap), y: 0)
+                }
+                HStack(alignment: .top, spacing: labelSpacing) {
+                    VStack(spacing: gap) {
+                        ForEach(0..<7, id: \.self) { row in
+                            Text(["一", "", "三", "", "五", "", "日"][row])
+                                .font(.system(size: 9))
+                                .foregroundColor(Theme.muted2)
+                                .frame(width: labelWidth, height: cell, alignment: .trailing)
                         }
                     }
+                    grid(cols, size: cell, maxTokens: d.maxTokens)
                 }
-                HStack(spacing: 6) {
-                    Text("少").font(.system(size: 11)).foregroundColor(Theme.muted2)
-                    ForEach(0..<5, id: \.self) { level in
-                        RoundedRectangle(cornerRadius: 2.5)
-                            .fill(Theme.accent.opacity([0.08, 0.35, 0.6, 0.9, 0.9][level]))
-                            .frame(width: 11, height: 11)
+                .padding(.top, monthRowHeight)
+                if let h = hovered {
+                    tooltip(for: h.day)
+                        .position(x: tooltipX(h.col, cell: cell, cols: cols.count),
+                                  y: tooltipHeight / 2 + 2)
+                }
+            }
+            .frame(height: monthRowHeight + 7 * cell + 6 * gap)
+            .onChange(of: state.filters) { _ in hovered = nil }
+            .background(
+                // 宽度探针：格宽 = (卡宽 − 行标签) / 列数，自适应铺满卡片消除右侧空白；
+                // GeometryReader 会吞掉自然高度，藏进 background 只取宽度
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { gridWidth = geo.size.width }
+                        .onChange(of: geo.size.width) { gridWidth = $0 }
+                }
+                .frame(height: 0)
+            )
+
+            legend(d)
+        }
+    }
+
+    /// 首帧探针未就绪时用 11pt 兜底（onAppear 当帧即回填真实宽度）
+    private func cellSize(cols: Int) -> CGFloat {
+        guard gridWidth > 0, cols > 0 else { return 11 }
+        let avail = gridWidth - labelWidth - labelSpacing - CGFloat(cols - 1) * gap
+        return min(18, max(6, avail / CGFloat(cols)))
+    }
+
+    private func grid(_ cols: [[HeatmapDay?]], size: CGFloat, maxTokens: Double) -> some View {
+        VStack(spacing: gap) {
+            ForEach(0..<7, id: \.self) { row in
+                HStack(spacing: gap) {
+                    ForEach(0..<cols.count, id: \.self) { col in
+                        cellView(cols[col][row], col: col, row: row, size: size,
+                                 maxTokens: maxTokens)
                     }
-                    Text("多").font(.system(size: 11)).foregroundColor(Theme.muted2)
-                    Spacer()
-                    Text("\(d.activeDays) 个活跃日 · 连续 \(d.streakDays) 天")
-                        .font(.system(size: 11))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func cellView(_ day: HeatmapDay?, col: Int, row: Int, size: CGFloat,
+                          maxTokens: Double) -> some View {
+        if let day {
+            RoundedRectangle(cornerRadius: 2.5)
+                .fill(Self.cellColor(day.tokens, max: maxTokens))
+                .frame(width: size, height: size)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .strokeBorder(hovered?.col == col && hovered?.row == row
+                                      ? Theme.text.opacity(0.55) : .clear, lineWidth: 1)
+                )
+                .onHover { inside in
+                    hovered = inside ? Hover(col: col, row: row, day: day) : nil
+                }
+        } else {
+            Color.clear.frame(width: size, height: size)
+        }
+    }
+
+    private var tooltipHeight: CGFloat { 88 }
+
+    private func tooltipX(_ col: Int, cell: CGFloat, cols: Int) -> CGFloat {
+        let width = max(gridWidth, 200)
+        let x = labelWidth + labelSpacing + CGFloat(col) * (cell + gap) + cell / 2
+        return min(max(x, 100), width - 100)
+    }
+
+    /// hover 明细卡：与主图 tooltip 同款视觉，吸顶跟随悬停列
+    private func tooltip(for day: HeatmapDay) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(Self.tipFormatter.string(from: Date(timeIntervalSince1970: day.dayStart / 1000)))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.text)
+            tooltipRow("Token", Fmt.tokens(day.tokens))
+            tooltipRow("调用", "\(Fmt.int(day.calls)) 次")
+            tooltipRow("成本", Fmt.cost(day.cost))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(width: 190, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Theme.panel)
+                .shadow(color: .black.opacity(0.18), radius: 10, y: 3)
+        )
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
+        .allowsHitTesting(false)
+    }
+
+    private func tooltipRow(_ key: String, _ value: String) -> some View {
+        HStack(spacing: 6) {
+            Text(key).font(.system(size: 11)).foregroundStyle(Theme.muted)
+            Spacer(minLength: 6)
+            Text(value).font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.text)
+        }
+    }
+
+    private func legend(_ d: HeatmapResult) -> some View {
+        HStack(spacing: 6) {
+            Text("少").font(.system(size: 11)).foregroundColor(Theme.muted2)
+            ForEach(0..<4, id: \.self) { level in
+                RoundedRectangle(cornerRadius: 2.5)
+                    .fill(Theme.accent.opacity([0.08, 0.35, 0.6, 0.9][level]))
+                    .frame(width: 11, height: 11)
+            }
+            Text("多").font(.system(size: 11)).foregroundColor(Theme.muted2)
+            Spacer()
+            Text("\(d.activeDays) 个活跃日 · 连续 \(d.streakDays) 天")
+                .font(.system(size: 11))
+                .foregroundColor(Theme.muted2)
+        }
+    }
+
+    /// 每列取首个实际日，月份与上一列不同才出标签（首列有日必标）
+    private func monthLabels(_ cols: [[HeatmapDay?]]) -> [(col: Int, month: Int)] {
+        var out: [(col: Int, month: Int)] = []
+        var prevMonth = -1
+        for (ci, col) in cols.enumerated() {
+            guard let first = col.compactMap({ $0 }).first else { continue }
+            let m = Calendar.current.component(
+                .month, from: Date(timeIntervalSince1970: first.dayStart / 1000))
+            if m != prevMonth {
+                out.append((col: ci, month: m))
+                prevMonth = m
+            }
+        }
+        return out
+    }
+}
+
+// MARK: - 预算告警横幅（budget.ts 口径：≥80% 提醒 / ≥100% 超限；未配置不占位）
+
+private struct BudgetBannerSection: View {
+    @ObservedObject var state: AppState
+
+    var body: some View {
+        if let b = state.budgetData, b.level != .ok {
+            let over = b.level == .over
+            let color: Color = over ? Theme.err : Theme.warn
+            HStack(spacing: 8) {
+                Image(systemName: over ? "exclamationmark.triangle.fill" : "gauge")
+                Text(detail(b)).lineLimit(2)
+                Spacer()
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(color)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 8).fill(color.opacity(0.1)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(color.opacity(0.35)))
+        }
+    }
+
+    private func detail(_ b: BudgetStatus) -> String {
+        var parts: [String] = []
+        if let limit = state.budget.monthlyTokens {
+            parts.append("Token \(Fmt.tokens(b.usedTokens)) / \(Fmt.tokens(limit))"
+                + "（\(Int((b.tokenRatio ?? 0) * 100))%）")
+        }
+        if let limit = state.budget.monthlyCost, let used = b.usedCost {
+            parts.append("成本 $\(String(format: "%.2f", used)) / $\(String(format: "%.0f", limit))")
+        }
+        return (b.level == .over ? "预算超限：" : "预算提醒：") + parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - 成就徽章（15 枚，全本地聚合）
+
+private struct AchievementsSection: View {
+    @ObservedObject var state: AppState
+
+    private static let icons: [String: String] = [
+        "first-call": "sparkles",
+        "tokens-1m": "cylinder.fill",
+        "tokens-1b": "cylinder.stack.fill",
+        "day-peak": "flame.fill",
+        "streak-7": "bolt.fill",
+        "streak-30": "bolt.badge.fill",
+        "night-owl": "moon.stars.fill",
+        "early-bird": "sunrise.fill",
+        "polyglot": "square.stack.3d.up.fill",
+        "tools-3": "hammer.fill",
+        "multi-host": "desktopcomputer",
+        "cache-master": "speedometer",
+        "cost-100": "dollarsign.circle.fill",
+        "projects-5": "folder.fill",
+        "marathon": "figure.run",
+    ]
+
+    var body: some View {
+        let list = achievements(state.snapshot.rows, now: Date().timeIntervalSince1970 * 1000)
+        let done = list.filter(\.achieved).count
+        Card(title: "成就 · \(done)/\(list.count)") {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 5),
+                      spacing: 10) {
+                ForEach(list) { a in
+                    badgeView(a)
+                }
+            }
+        }
+    }
+
+    private func badgeView(_ a: Achievement) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: Self.icons[a.id] ?? "rosette")
+                .font(.system(size: 16))
+                .foregroundColor(a.achieved ? Theme.accent : Theme.muted2)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(a.name)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                if !a.achieved, let p = a.progress {
+                    ProgressView(value: p)
+                        .tint(Theme.accent)
+                        .controlSize(.small)
+                } else {
+                    Text(a.achieved ? "已达成" : "—")
+                        .font(.system(size: 10))
                         .foregroundColor(Theme.muted2)
                 }
             }
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.bgSoft))
+        .help("\(a.detail)\(a.achieved ? "（已达成）" : "")")
     }
 }
