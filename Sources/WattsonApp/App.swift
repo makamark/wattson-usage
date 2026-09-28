@@ -8,11 +8,17 @@ import AppKit
 import Combine
 import ServiceManagement
 
+// 入口：直接以 AppKit 托管（不再挂 SwiftUI Settings scene）。
+// 原因：macOS 26+ 会把「只有 Settings scene」的应用在启动时自动弹出标准
+// 设置窗——里面是 EmptyView，就是 2.3.0 发布版「启动弹空白设置窗」的根因。
+// 全部窗口（状态栏小窗/看板/设置）由本类手动托管，无需任何 SwiftUI scene。
 @main
-struct WattsonAppMain: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    var body: some Scene {
-        Settings { EmptyView() }
+struct WattsonAppMain {
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        app.run()
     }
 }
 

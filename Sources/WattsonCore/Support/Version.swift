@@ -4,4 +4,4 @@
 // Electron 时代为 0.1.x。
 import Foundation
 
-public let WATTSON_VERSION = "2.3.0"
+public let WATTSON_VERSION = "2.3.1"
